@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  password      String
+  name          String?
+  isAdmin       Boolean         @default(false)
+  lists         UserList[] 
+  comments      Comment[]
+  watchProgress WatchProgress[]
+  subscription  Subscription?
+  payments      Payment[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model Movie {
+  id           String          @id @default(cuid())
+  title        String
+  description  String
+  thumbnailUrl String
+  heroUrl      String?
+  trailerUrl   String?
+  genre        String
+  clips        Clip[]
+  lists        UserList[]
+  comments     Comment[]
+  watchProgress WatchProgress[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+}
+
+model WatchProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movieId   String
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  clipId    String?
+  clip      Clip?    @relation(fields: [clipId], references: [id], onDelete: SetNull)
+  timestamp Float    @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, movieId])
+}
+
+model Clip {
+  id            String          @id @default(cuid())
+  movieId       String
+  movie         Movie           @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  videoUrl      String
+  sequence      Int
+  duration      Int
+  watchProgress WatchProgress[]
+  createdAt     DateTime        @default(now())
+
+  @@unique([movieId, sequence])
+  @@index([movieId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movieId   String
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model UserList {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  movieId   String
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  type      String   // LIKED, WATCH_LATER
+
+  @@unique([userId, movieId, type])
+}
+
+model Subscription {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  razorpaySubId    String?   @unique
+  razorpayPlanId   String?
+  status           String    @default("FREE") // FREE, ACTIVE, PAST_DUE, CANCELLED, EXPIRED
+  currentPeriodEnd DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Payment {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  razorpayPaymentId String?  @unique
+  razorpayOrderId   String?
+  amount            Int      // Amount in paise (5000 = ₹50)
+  status            String   // CREATED, PAID, FAILED
+  createdAt         DateTime @default(now())
+}
