@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
 import prisma from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
+import logger from '../lib/logger';
 
 const router = Router();
 
@@ -36,7 +38,7 @@ router.get('/me', async (req: Request, res: Response): Promise<void> => {
 
         res.json(user);
     } catch (error) {
-        console.error('Get profile error:', error);
+        logger.error({ err: error }, 'Get profile error');
         res.status(500).json({ error: 'Failed to fetch profile' });
     }
 });
@@ -66,7 +68,7 @@ router.get('/me/likes', async (req: Request, res: Response): Promise<void> => {
         const movies = likedMovies.map(item => item.movie);
         res.json(movies);
     } catch (error) {
-        console.error('Get likes error:', error);
+        logger.error({ err: error }, 'Get likes error');
         res.status(500).json({ error: 'Failed to fetch liked movies' });
     }
 });
@@ -116,7 +118,7 @@ router.post('/me/likes/:movieId', async (req: Request, res: Response): Promise<v
             res.json({ liked: true, message: 'Movie added to likes' });
         }
     } catch (error) {
-        console.error('Toggle like error:', error);
+        logger.error({ err: error }, 'Toggle like error');
         res.status(500).json({ error: 'Failed to toggle like' });
     }
 });
@@ -146,7 +148,7 @@ router.get('/me/watchlist', async (req: Request, res: Response): Promise<void> =
         const movies = watchlist.map(item => item.movie);
         res.json(movies);
     } catch (error) {
-        console.error('Get watchlist error:', error);
+        logger.error({ err: error }, 'Get watchlist error');
         res.status(500).json({ error: 'Failed to fetch watchlist' });
     }
 });
@@ -196,7 +198,7 @@ router.post('/me/watchlist/:movieId', async (req: Request, res: Response): Promi
             res.json({ inWatchlist: true, message: 'Movie added to watchlist' });
         }
     } catch (error) {
-        console.error('Toggle watchlist error:', error);
+        logger.error({ err: error }, 'Toggle watchlist error');
         res.status(500).json({ error: 'Failed to toggle watchlist' });
     }
 });
@@ -234,7 +236,7 @@ router.get('/me/status/:movieId', async (req: Request, res: Response): Promise<v
             inWatchlist: !!inWatchlist
         });
     } catch (error) {
-        console.error('Get status error:', error);
+        logger.error({ err: error }, 'Get status error');
         res.status(500).json({ error: 'Failed to fetch status' });
     }
 });
@@ -278,7 +280,7 @@ router.post('/me/progress', async (req: Request, res: Response): Promise<void> =
 
         res.json({ success: true, progress });
     } catch (error) {
-        console.error('Save progress error:', error);
+        logger.error({ err: error }, 'Save progress error');
         res.status(500).json({ error: 'Failed to save progress' });
     }
 });
@@ -316,7 +318,7 @@ router.get('/me/continue-watching', async (req: Request, res: Response): Promise
 
         res.json(result);
     } catch (error) {
-        console.error('Get continue watching error:', error);
+        logger.error({ err: error }, 'Get continue watching error');
         res.status(500).json({ error: 'Failed to fetch continue watching' });
     }
 });
@@ -333,8 +335,94 @@ router.delete('/me/progress/:movieId', async (req: Request, res: Response): Prom
 
         res.json({ success: true, message: 'Progress cleared' });
     } catch (error) {
-        console.error('Clear progress error:', error);
+        logger.error({ err: error }, 'Clear progress error');
         res.status(500).json({ error: 'Failed to clear progress' });
+    }
+});
+
+// GET /users/me/progress/:movieId - Get clip progress for episode drawer
+router.get('/me/progress/:movieId', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = req.user!.id;
+        const movieId = req.params.movieId as string;
+
+        const movie = await prisma.movie.findUnique({
+            where: { id: movieId },
+            include: {
+                clips: { orderBy: { sequence: 'asc' } }
+            }
+        });
+
+        if (!movie) {
+            res.status(404).json({ error: 'Movie not found' });
+            return;
+        }
+
+        const progress = await prisma.watchProgress.findUnique({
+            where: { userId_movieId: { userId, movieId } }
+        });
+
+        const currentClipIndex = progress ? Math.floor(progress.timestamp) : 0;
+
+        const clipsProgress = movie.clips.map((clip, index) => ({
+            clipId: clip.id,
+            sequence: clip.sequence,
+            watched: index <= currentClipIndex
+        }));
+
+        res.json({
+            movieId,
+            currentClipIndex,
+            clips: clipsProgress
+        });
+    } catch (error) {
+        logger.error({ err: error }, 'Get movie progress error');
+        res.status(500).json({ error: 'Failed to fetch movie progress' });
+    }
+});
+
+// DELETE /users/me - Delete user account (GDPR compliance)
+router.delete('/me', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = req.user!.id;
+        const { password } = req.body;
+
+        if (!password) {
+            res.status(400).json({ error: 'Password is required to delete account' });
+            return;
+        }
+
+        // Fetch user password hash
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { password: true }
+        });
+
+        if (!user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+
+        // Verify password
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            res.status(401).json({ error: 'Incorrect password' });
+            return;
+        }
+
+        // Delete user (cascade deletion in schema will delete related records)
+        await prisma.user.delete({
+            where: { id: userId }
+        });
+
+        // Clear the admin_token cookie if it exists (for admin users using browser)
+        res.clearCookie('admin_token');
+
+        logger.info({ userId }, 'User deleted account successfully');
+        res.json({ success: true, message: 'Account deleted successfully' });
+    } catch (error) {
+        logger.error({ err: error }, 'Delete account error');
+        res.status(500).json({ error: 'Failed to delete account' });
     }
 });
 

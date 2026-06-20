@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, ImageBackground } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { useAppStore } from "../src/lib/store";
@@ -6,34 +6,39 @@ import { StatusBar } from "expo-status-bar";
 
 export default function LoginScreen() {
     const router = useRouter();
-    const { login, isAuthenticated } = useAppStore();
+    const { login, isAuthenticated, authError, clearAuthError } = useAppStore();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
+    const [loginError, setLoginError] = useState<string | null>(null);
     const [emailFocused, setEmailFocused] = useState(false);
     const [passwordFocused, setPasswordFocused] = useState(false);
 
-    // If already authenticated, redirect to home
-    if (isAuthenticated) {
-        router.replace("/(tabs)/home");
-        return null;
-    }
+    // Redirect to home if already authenticated (e.g. after successful login)
+    useEffect(() => {
+        if (isAuthenticated) {
+            router.replace("/(tabs)/home");
+        }
+    }, [isAuthenticated]);
 
     const handleLogin = async () => {
         if (!email || !password) {
-            Alert.alert("Error", "Please enter both email and password");
+            setLoginError('Please enter both email and password');
             return;
         }
 
+        setLoginError(null);
+        clearAuthError();
         setLoading(true);
         const success = await login(email, password);
         setLoading(false);
 
-        if (success) {
-            router.replace("/(tabs)/home");
-        } else {
-            Alert.alert("Login Failed", "Invalid email or password.");
+        if (!success) {
+            // Show the actual API error instead of a generic message
+            const errorMsg = useAppStore.getState().authError || 'Login failed. Please check your credentials or try again later.';
+            setLoginError(errorMsg);
         }
+        // If success, the useEffect above handles navigation
     };
 
     return (
@@ -91,13 +96,20 @@ export default function LoginScreen() {
                         </Text>
                     </TouchableOpacity>
 
+                    {/* Inline error message (works on all platforms including web) */}
+                    {loginError && (
+                        <View style={styles.errorBanner}>
+                            <Text style={styles.errorText}>{loginError}</Text>
+                        </View>
+                    )}
+
                     <View style={styles.optionsRow}>
                         <View style={styles.rememberMe}>
                             <View style={styles.checkbox} />
                             <Text style={styles.rememberText}>Remember me</Text>
                         </View>
-                        <TouchableOpacity>
-                            <Text style={styles.helpText}>Need help?</Text>
+                        <TouchableOpacity onPress={() => router.push('/forgot-password')}>
+                            <Text style={styles.helpText}>Forgot Password?</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -235,5 +247,16 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginTop: 16,
         paddingHorizontal: 20,
+    },
+    errorBanner: {
+        backgroundColor: '#E50914',
+        borderRadius: 4,
+        padding: 12,
+        marginTop: 12,
+    },
+    errorText: {
+        color: '#fff',
+        fontSize: 14,
+        textAlign: 'center',
     },
 });

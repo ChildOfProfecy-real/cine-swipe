@@ -15,4 +15,4 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     }
 });
 
-export const STORAGE_BUCKET = 'media';
+export const STORAGE_BUCKET = 'videos';

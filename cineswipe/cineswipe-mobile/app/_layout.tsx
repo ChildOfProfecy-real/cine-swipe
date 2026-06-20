@@ -1,4 +1,4 @@
-import { Stack } from "expo-router";
+import { Stack, useRouter, useSegments } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
@@ -7,7 +7,10 @@ import { useAppStore } from "../src/lib/store";
 
 export default function Layout() {
     const [isInitialized, setIsInitialized] = useState(false);
-    const { checkAuth, fetchMovies, authLoading } = useAppStore();
+    const { checkAuth, fetchMovies, isAuthenticated, authLoading } = useAppStore();
+    const router = useRouter();
+    const segments = useSegments();
+    const rootSegment = segments[0];
 
     // Initialize app on mount - restore auth session and fetch movies
     useEffect(() => {
@@ -16,8 +19,8 @@ export default function Layout() {
             try {
                 // Check if user has a valid session from previous login
                 await checkAuth();
-                // Fetch movies for the app
-                await fetchMovies();
+                // Fetch movies for the app (don't block on failure)
+                fetchMovies().catch(err => console.warn('Movie fetch failed:', err));
                 console.log('✅ App initialized');
             } catch (error) {
                 console.error('❌ Initialization error:', error);
@@ -29,8 +32,24 @@ export default function Layout() {
         initialize();
     }, []);
 
-    // Show loading screen while initializing
-    if (!isInitialized || authLoading) {
+    // Global Auth Guard: Protect ALL routes and prevent bypassing login
+    useEffect(() => {
+        // Wait until initial auth check has completed
+        if (!isInitialized || authLoading) return;
+
+        const inAuthGroup = rootSegment === 'login' || rootSegment === 'signup';
+
+        if (!isAuthenticated && !inAuthGroup) {
+            // Redirect to login if unauthenticated user tries to access ANY protected route
+            router.replace('/login');
+        } else if (isAuthenticated && inAuthGroup) {
+            // Redirect to home if authenticated user tries to access login/signup
+            router.replace('/(tabs)/home');
+        }
+    }, [isAuthenticated, isInitialized, rootSegment, authLoading]);
+
+    // Show loading screen ONLY during initial boot — never during login/logout
+    if (!isInitialized) {
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#E50914" />

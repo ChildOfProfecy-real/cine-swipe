@@ -1,5 +1,6 @@
 import { supabase, STORAGE_BUCKET } from './supabase';
 import fs from 'fs';
+import logger from './logger';
 
 /**
  * Structured storage helper for media/movies/{movieId}/... paths.
@@ -123,7 +124,7 @@ export async function deleteClipFile(movieId: string, sequence: number): Promise
     const filePath = `movies/${movieId}/clips/clip${sequence}.mp4`;
     const { error } = await supabase.storage.from(STORAGE_BUCKET).remove([filePath]);
     if (error) {
-        console.warn(`⚠️ deleteClipFile failed (${filePath}):`, error.message);
+        logger.warn({ filePath, error: error.message }, 'deleteClipFile failed');
     }
 }
 
@@ -153,7 +154,7 @@ async function cleanupLegacyFiles(movieId: string): Promise<void> {
         // We can't know the exact filenames without querying clips first,
         // but cascade delete already cleaned up the DB records.
         // This is a best-effort cleanup — log a note for manual review.
-        console.log(`ℹ️ Legacy file cleanup for movie ${movieId}: check 'videos/' and 'images/' buckets if orphans exist.`);
+        logger.info({ movieId }, 'Legacy file cleanup: check videos/ and images/ buckets if orphans exist');
     } catch {
         // Non-fatal
     }

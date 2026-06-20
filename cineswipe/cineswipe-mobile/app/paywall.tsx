@@ -5,7 +5,10 @@ import { Crown, ArrowLeft, Star } from "lucide-react-native";
 import { useAppStore } from "../src/lib/store";
 import { createSubscription, verifySubscription, cancelPendingSubscription } from "../src/lib/api";
 import { useState } from "react";
-import RazorpayCheckout from 'react-native-razorpay';
+
+let RazorpayCheckout: any = null;
+// Native module removed for Expo Go compatibility.
+// If you build a custom dev client in the future, you can reinstall 'react-native-razorpay' and re-add the require here.
 
 export default function PaywallScreen() {
     const { movieId, movieTitle, clipIndex, thumbnailUrl } = useLocalSearchParams<{

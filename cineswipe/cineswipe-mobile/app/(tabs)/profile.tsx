@@ -1,52 +1,42 @@
-import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, ScrollView, Platform } from "react-native";
+import { View, Text, StyleSheet, Image, TouchableOpacity, FlatList, ScrollView, Platform, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAppStore } from "../../src/lib/store";
 import { Link, useRouter } from "expo-router";
-import { Heart, Clock, ChevronRight, LogOut, User, Settings, Bell, Download } from "lucide-react-native";
-import { useState } from "react";
+import { Heart, Clock, ChevronRight, LogOut, User, Settings, Bell, Download, Sparkles } from "lucide-react-native";
+import { useState, useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { getContinueWatching } from "../../src/lib/api";
 
 export default function ProfileScreen() {
     const router = useRouter();
-    const { getLikedMovies, getWatchLaterMovies, currentUser, isAuthenticated, logout, isPremium } = useAppStore();
+    const { movies, getLikedMovies, getWatchLaterMovies, currentUser, isAuthenticated, isPremium } = useAppStore();
     const likedMovies = getLikedMovies();
     const watchLaterMovies = getWatchLaterMovies();
-    const [showConfirm, setShowConfirm] = useState(false);
+    const [continueWatchingCount, setContinueWatchingCount] = useState(0);
+
+    useFocusEffect(
+        useCallback(() => {
+            if (isAuthenticated) {
+                getContinueWatching()
+                    .then(data => {
+                        setContinueWatchingCount(data.length);
+                    })
+                    .catch(console.error);
+            } else {
+                setContinueWatchingCount(0);
+            }
+        }, [isAuthenticated])
+    );
 
     const handlePremiumPress = () => {
-        if (Platform.OS === 'web') {
-            const confirmed = window.confirm("Do you want to subscribe to premium for unlimited access?");
-            if (confirmed) {
-                router.push('/paywall');
-            }
-        } else {
-            import('react-native').then(({ Alert }) => {
-                Alert.alert(
-                    'Subscribe to Premium',
-                    'Do you want to unlock unlimited clips and remove limits?',
-                    [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Yes', onPress: () => router.push('/paywall') }
-                    ]
-                );
-            });
-        }
-    };
-
-    const handleLogout = () => {
-        // On web, Alert.alert doesn't work, so we use a simple confirm or direct logout
-        if (Platform.OS === 'web') {
-            const confirmed = window.confirm("Are you sure you want to sign out?");
-            if (confirmed) {
-                performLogout();
-            }
-        } else {
-            setShowConfirm(true);
-        }
-    };
-
-    const performLogout = async () => {
-        await logout();
-        router.replace("/login");
+        Alert.alert(
+            'Subscribe to Premium',
+            'Do you want to unlock unlimited clips and remove limits?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Yes', onPress: () => router.push('/paywall') }
+            ]
+        );
     };
 
     const renderMovie = ({ item }: { item: any }) => (
@@ -63,58 +53,50 @@ export default function ProfileScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            {/* Confirmation Modal for Native */}
-            {showConfirm && (
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalCard}>
-                        <Text style={styles.modalTitle}>Sign Out</Text>
-                        <Text style={styles.modalText}>Are you sure you want to sign out?</Text>
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity
-                                style={styles.cancelButton}
-                                onPress={() => setShowConfirm(false)}
-                            >
-                                <Text style={styles.cancelButtonText}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.confirmButton}
-                                onPress={performLogout}
-                            >
-                                <Text style={styles.confirmButtonText}>Sign Out</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            )}
 
             <ScrollView showsVerticalScrollIndicator={false}>
-                {/* Header with User Info */}
-                <View style={styles.header}>
-                    <Text style={styles.headerTitle}>My Netflix</Text>
-                    {isAuthenticated && currentUser && (
-                        <View style={styles.userBadge}>
-                            <User color="#fff" size={14} />
-                            <Text style={styles.userName}>{currentUser.name}</Text>
-                        </View>
-                    )}
-                </View>
-
-                {/* User Profile Card - Only shown when logged in */}
-                {isAuthenticated && currentUser && (
-                    <View style={styles.profileCard}>
-                        <View style={styles.avatarContainer}>
-                            <View style={styles.avatar}>
-                                <User color="#fff" size={32} />
+                {/* Centered Avatar Header */}
+                <View style={styles.profileHeaderCentered}>
+                    
+                    <View style={[
+                        styles.largeAvatar, 
+                        isPremium && { borderColor: '#D4AF37', shadowColor: '#D4AF37', shadowOffset: {width: 0, height: 0}, shadowOpacity: 0.6, shadowRadius: 8, elevation: 8 }
+                    ]}>
+                        <User color="#000" size={40} />
+                    </View>
+                    
+                    {isAuthenticated && currentUser ? (
+                        <>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={[styles.profileNameLarge, isPremium && { color: '#D4AF37' }]}>{currentUser.name}</Text>
+                                {isPremium && (
+                                    <View style={{ backgroundColor: 'rgba(212, 175, 55, 0.1)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#D4AF37' }}>
+                                        <Text style={{ color: '#D4AF37', fontSize: 10, fontWeight: 'bold' }}>👑 PREMIUM</Text>
+                                    </View>
+                                )}
                             </View>
-                        </View>
-                        <View style={styles.profileInfo}>
-                            <Text style={styles.profileName}>{currentUser.name}</Text>
-                            <Text style={styles.profileEmail}>{currentUser.email}</Text>
                             {currentUser.isAdmin && (
                                 <View style={styles.adminBadge}>
                                     <Text style={styles.adminBadgeText}>ADMIN</Text>
                                 </View>
                             )}
+                        </>
+                    ) : (
+                        <Text style={styles.profileNameLarge}>Guest</Text>
+                    )}
+                </View>
+
+                {/* Stats Row */}
+                {isAuthenticated && (
+                    <View style={styles.statsRow}>
+                        <View style={styles.statColumn}>
+                            <Text style={styles.statValue}>{continueWatchingCount}</Text>
+                            <Text style={styles.statLabel}>Watching</Text>
+                        </View>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statColumn}>
+                            <Text style={styles.statValue}>{likedMovies.length}</Text>
+                            <Text style={styles.statLabel}>Saved</Text>
                         </View>
                     </View>
                 )}
@@ -122,69 +104,52 @@ export default function ProfileScreen() {
                 {/* Premium Banner */}
                 {isAuthenticated && !isPremium && (
                     <TouchableOpacity
-                        style={styles.premiumBanner}
+                        style={styles.premiumBannerGold}
                         onPress={handlePremiumPress}
                         activeOpacity={0.8}
                     >
                         <View style={styles.premiumContent}>
-                            <Text style={styles.premiumTitle}>Go Premium</Text>
-                            <Text style={styles.premiumDesc}>Unlock unlimited clips and remove limits</Text>
+                            <Text style={styles.premiumTitleGold}>👑 CineSwipe Premium</Text>
+                            <Text style={styles.premiumDescGold}>Unlock exclusive content. Upgrade Now.</Text>
                         </View>
-                        <ChevronRight color="#fff" size={24} />
+                        <ChevronRight color="#C8AA64" size={24} />
                     </TouchableOpacity>
                 )}
 
-                {/* Liked Movies Section */}
+                {/* Saved Grid Section */}
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
-                        <Heart color="#E50914" size={20} />
-                        <Text style={styles.sectionTitle}>Liked Videos</Text>
+                        <Text style={styles.sectionTitleGrid}>Saved Movies</Text>
                         <Text style={styles.sectionCount}>({likedMovies.length})</Text>
                     </View>
                     {likedMovies.length > 0 ? (
-                        <FlatList
-                            horizontal
-                            data={likedMovies}
-                            renderItem={renderMovie}
-                            keyExtractor={(item) => `liked-${item.id}`}
-                            showsHorizontalScrollIndicator={false}
-                        />
+                        <View style={styles.gridContainer}>
+                            {likedMovies.map((movie) => (
+                                <Link key={`saved-${movie.id}`} href={`/player/${movie.id}`} asChild>
+                                    <TouchableOpacity style={styles.gridMovieCard}>
+                                        <Image
+                                            source={{ uri: movie.thumbnailUrl }}
+                                            style={styles.gridMovieThumbnail}
+                                            resizeMode="cover"
+                                        />
+                                        <Text style={styles.gridMovieTitle} numberOfLines={1}>{movie.title}</Text>
+                                        <Text style={styles.gridMovieGenre}>{movie.genre}</Text>
+                                    </TouchableOpacity>
+                                </Link>
+                            ))}
+                        </View>
                     ) : (
-                        <Text style={styles.emptyText}>No liked videos yet. Tap the heart icon while watching!</Text>
-                    )}
-                </View>
-
-                {/* Watch Later Section */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Clock color="#fff" size={20} />
-                        <Text style={styles.sectionTitle}>My List</Text>
-                        <Text style={styles.sectionCount}>({watchLaterMovies.length})</Text>
-                    </View>
-                    {watchLaterMovies.length > 0 ? (
-                        <FlatList
-                            horizontal
-                            data={watchLaterMovies}
-                            renderItem={renderMovie}
-                            keyExtractor={(item) => `watch-${item.id}`}
-                            showsHorizontalScrollIndicator={false}
-                        />
-                    ) : (
-                        <Text style={styles.emptyText}>Your list is empty. Tap the + icon to add movies!</Text>
+                        <Text style={styles.emptyText}>You haven't saved any movies yet. Tap the heart icon to save them!</Text>
                     )}
                 </View>
 
                 {/* Settings Links */}
                 <View style={styles.settingsSection}>
-                    <TouchableOpacity style={styles.settingsItem}>
-                        <View style={styles.settingsLeft}>
-                            <Download color="#808080" size={20} />
-                            <Text style={styles.settingsText}>Downloads</Text>
-                        </View>
-                        <ChevronRight color="#808080" size={20} />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity style={styles.settingsItem}>
+                    <TouchableOpacity 
+                        style={styles.settingsItem}
+                        onPress={() => router.push('/settings')}
+                        activeOpacity={0.7}
+                    >
                         <View style={styles.settingsLeft}>
                             <Settings color="#808080" size={20} />
                             <Text style={styles.settingsText}>App Settings</Text>
@@ -192,16 +157,16 @@ export default function ProfileScreen() {
                         <ChevronRight color="#808080" size={20} />
                     </TouchableOpacity>
 
-                    {/* Sign Out Button - Below App Settings */}
-                    <TouchableOpacity
-                        style={styles.signOutItem}
-                        onPress={handleLogout}
+                    <TouchableOpacity 
+                        style={styles.settingsItem}
+                        onPress={() => router.push('/settings/app-icon')}
                         activeOpacity={0.7}
                     >
                         <View style={styles.settingsLeft}>
-                            <LogOut color="#E50914" size={20} />
-                            <Text style={styles.signOutText}>Sign Out</Text>
+                            <Sparkles color="#808080" size={20} />
+                            <Text style={styles.settingsText}>App Icon</Text>
                         </View>
+                        <ChevronRight color="#808080" size={20} />
                     </TouchableOpacity>
                 </View>
 
@@ -283,64 +248,60 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
     },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
+    profileHeaderCentered: {
         alignItems: 'center',
-        marginTop: 16,
-        marginBottom: 20,
-    },
-    headerTitle: {
-        color: '#fff',
-        fontSize: 28,
-        fontWeight: 'bold',
-    },
-    userBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#333',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 20,
-    },
-    userName: {
-        color: '#fff',
-        fontSize: 12,
-        marginLeft: 6,
-    },
-    profileCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#1a1a1a',
-        padding: 16,
-        borderRadius: 12,
+        marginTop: 20,
         marginBottom: 24,
-        borderWidth: 1,
-        borderColor: '#333',
+        position: 'relative',
     },
-    avatarContainer: {
-        marginRight: 16,
+    settingsIconTopRight: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        padding: 8,
     },
-    avatar: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: '#E50914',
+    largeAvatar: {
+        width: 90,
+        height: 90,
+        borderRadius: 45,
+        backgroundColor: '#fff',
         justifyContent: 'center',
         alignItems: 'center',
+        marginBottom: 16,
+        borderWidth: 2,
+        borderColor: '#333',
     },
-    profileInfo: {
+    profileNameLarge: {
+        color: '#fff',
+        fontSize: 24,
+        fontWeight: 'bold',
+        fontStyle: 'italic',
+        fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+    },
+    statsRow: {
+        flexDirection: 'row',
+        backgroundColor: 'rgba(255,255,255,0.05)',
+        borderRadius: 16,
+        paddingVertical: 16,
+        marginBottom: 32,
+    },
+    statColumn: {
         flex: 1,
+        alignItems: 'center',
     },
-    profileName: {
+    statDivider: {
+        width: 1,
+        backgroundColor: 'rgba(255,255,255,0.1)',
+    },
+    statValue: {
         color: '#fff',
         fontSize: 18,
         fontWeight: 'bold',
         marginBottom: 4,
     },
-    profileEmail: {
+    statLabel: {
         color: '#808080',
-        fontSize: 14,
+        fontSize: 12,
     },
     adminBadge: {
         backgroundColor: '#E50914',
@@ -363,25 +324,43 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 12,
     },
-    sectionTitle: {
+    sectionTitleGrid: {
         color: '#fff',
-        fontSize: 18,
-        fontWeight: '600',
-        marginLeft: 10,
+        fontSize: 20,
+        fontWeight: 'bold',
     },
     sectionCount: {
         color: '#808080',
         fontSize: 14,
         marginLeft: 6,
     },
-    movieCard: {
-        marginRight: 12,
+    gridContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
     },
-    movieThumbnail: {
-        width: 110,
-        height: 160,
-        borderRadius: 6,
-        backgroundColor: '#333',
+    gridMovieCard: {
+        width: '48%',
+        marginBottom: 20,
+    },
+    gridMovieThumbnail: {
+        width: '100%',
+        aspectRatio: 2/3,
+        borderRadius: 8,
+        backgroundColor: '#1a1a1a',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
+        marginBottom: 8,
+    },
+    gridMovieTitle: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    gridMovieGenre: {
+        color: '#808080',
+        fontSize: 12,
+        marginTop: 2,
     },
     emptyText: {
         color: '#808080',
@@ -446,33 +425,25 @@ const styles = StyleSheet.create({
         marginTop: 24,
         marginBottom: 20,
     },
-    premiumBanner: {
+    premiumBannerGold: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: 'linear-gradient(90deg, #E50914, #B20710)', // Fallback to solid red if gradient unsupported
+        backgroundColor: 'rgba(40,30,10,0.8)',
         padding: 16,
         borderRadius: 12,
-        marginBottom: 24,
+        marginBottom: 32,
         borderWidth: 1,
-        borderColor: '#ff4d4d',
-        shadowColor: '#E50914',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 5,
+        borderColor: 'rgba(200,170,100,0.5)',
     },
-    premiumContent: {
-        flex: 1,
-    },
-    premiumTitle: {
-        color: '#fff',
-        fontSize: 18,
+    premiumTitleGold: {
+        color: '#C8AA64',
+        fontSize: 16,
         fontWeight: 'bold',
         marginBottom: 4,
     },
-    premiumDesc: {
-        color: '#ffd0d0',
-        fontSize: 14,
+    premiumDescGold: {
+        color: '#a08b50',
+        fontSize: 13,
     },
 });

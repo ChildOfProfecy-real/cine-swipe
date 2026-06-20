@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import logger from '../lib/logger';
 import multer from 'multer';
 import os from 'os';
 import prisma from '../lib/prisma';
@@ -45,7 +46,7 @@ function handleMulterUpload(fields: multer.Field[]) {
     return (req: Request, res: Response, next: NextFunction) => {
         upload.fields(fields)(req, res, (err: any) => {
             if (err) {
-                console.error('❌ Multer error:', err);
+                logger.error({ err }, '');
                 return res.status(400).json({ error: err.message });
             }
             next();
@@ -143,7 +144,7 @@ router.get('/stats', async (req: Request, res: Response): Promise<void> => {
             recentPayments
         });
     } catch (error) {
-        console.error('Stats error:', error);
+        logger.error({ err: error }, '');
         res.status(500).json({ error: 'Failed to fetch stats' });
     }
 });
@@ -186,7 +187,7 @@ router.post(
                 },
             });
 
-            console.log(`🎬 Created movie ${movie.id}: ${title}`);
+            logger.info('Action completed');
 
             // 2. Upload files to structured storage
             let thumbnailUrl = '';
@@ -195,22 +196,22 @@ router.post(
 
             if (files.thumbnail?.[0]) {
                 thumbnailUrl = await uploadMovieFile(movie.id, 'thumbnail', toStorageFile(files.thumbnail[0]));
-                console.log('📸 Thumbnail uploaded');
+                logger.info('Action completed');
             }
 
             if (files.hero?.[0]) {
                 heroUrl = await uploadMovieFile(movie.id, 'hero', toStorageFile(files.hero[0]));
-                console.log('🖼️ Hero uploaded');
+                logger.info('Action completed');
             }
 
             if (files.trailer?.[0]) {
                 trailerUrl = await uploadMovieFile(movie.id, 'trailer', toStorageFile(files.trailer[0]));
-                console.log('🎞️ Trailer uploaded');
+                logger.info('Action completed');
             }
 
             // 3. Upload first clip
             const clipUrl = await uploadClipFile(movie.id, 1, toStorageFile(files.clip[0]));
-            console.log('🎥 Clip 1 uploaded');
+            logger.info('Action completed');
 
             // 4. Update movie with URLs + create clip row
             const updatedMovie = await prisma.$transaction(async (tx) => {
@@ -234,10 +235,10 @@ router.post(
                 });
             });
 
-            console.log(`✅ Movie ${movie.id} fully created`);
+            logger.info('Action completed');
             res.status(201).json(updatedMovie);
         } catch (error) {
-            console.error('Create movie error:', error);
+            logger.error({ err: error }, '');
             res.status(500).json({ error: 'Failed to create movie' });
         }
     }
@@ -286,10 +287,10 @@ router.post(
                 },
             });
 
-            console.log(`✅ Clip ${newSequence} added to movie ${movieId} (duration: ${clipDuration}s)`);
+            logger.info({ clipId: clip.id }, 'Clip added');
             res.status(201).json(clip);
         } catch (error) {
-            console.error('Add clip error:', error);
+            logger.error({ err: error }, '');
             res.status(500).json({ error: 'Failed to add clip' });
         }
     }
@@ -309,18 +310,18 @@ router.delete('/movies/:id', async (req: Request, res: Response): Promise<void> 
         // Delete all storage files (non-fatal — DB is source of truth)
         try {
             await deleteMovieFolder(movieId);
-            console.log(`🗑️ Storage cleaned for movie ${movieId}`);
+            logger.info({ movieId }, 'Movie folder deleted from storage');
         } catch (err) {
-            console.warn(`⚠️ Storage cleanup skipped for movie ${movieId}:`, err);
+            logger.warn({ err }, 'Failed to delete movie folder from storage');
         }
 
         // Delete from DB (cascade handles clips, comments, etc.)
         await prisma.movie.delete({ where: { id: movieId } });
 
-        console.log(`✅ Movie ${movieId} deleted`);
+        logger.info({ movieId }, 'Movie deleted');
         res.json({ message: 'Movie deleted successfully' });
     } catch (error) {
-        console.error('Delete movie error:', error);
+        logger.error({ err: error }, '');
         res.status(500).json({ error: 'Failed to delete movie' });
     }
 });
@@ -355,7 +356,7 @@ router.delete(
             try {
                 await deleteClipFile(movieId, deletedSequence);
             } catch (err) {
-                console.warn(`⚠️ Storage delete skipped for clip ${deletedSequence}:`, err);
+                logger.warn({ err }, 'Failed to delete clip file');
             }
 
             // 2. Delete DB record + renumber in a transaction
@@ -376,7 +377,7 @@ router.delete(
                         try {
                             newUrl = await moveClipFile(movieId, clip.sequence, newSeq);
                         } catch (err) {
-                            console.warn(`⚠️ Storage move skipped ${clip.sequence}→${newSeq}:`, err);
+                            logger.warn({ err }, 'Failed to move clip file');
                         }
 
                         await tx.clip.update({
@@ -384,15 +385,15 @@ router.delete(
                             data: { sequence: newSeq, videoUrl: newUrl },
                         });
 
-                        console.log(`📎 Renumbered clip ${clip.sequence} → ${newSeq}`);
+                        logger.info({ clipId: clip.id, newSeq }, 'Clip renumbered');
                     }
                 }
             });
 
-            console.log(`✅ Clip ${deletedSequence} deleted from movie ${movieId}`);
+            logger.info({ clipId, movieId }, 'Clip deleted');
             res.json({ message: 'Clip deleted and renumbered' });
         } catch (error) {
-            console.error('Delete clip error:', error);
+            logger.error({ err: error }, '');
             res.status(500).json({ error: 'Failed to delete clip' });
         }
     }
@@ -427,7 +428,7 @@ router.put(
             try {
                 await deleteClipFile(movieId, existingClip.sequence);
             } catch (err) {
-                console.warn(`⚠️ Old clip file delete skipped:`, err);
+                logger.warn({ err }, 'Failed to delete old clip file');
             }
 
             // Upload new file
@@ -447,10 +448,10 @@ router.put(
                 data: updateData,
             });
 
-            console.log(`✅ Clip ${existingClip.sequence} replaced for movie ${movieId}`);
+            logger.info({ clipId }, 'Clip updated');
             res.json(updatedClip);
         } catch (error) {
-            console.error('Replace clip error:', error);
+            logger.error({ err: error }, '');
             res.status(500).json({ error: 'Failed to replace clip' });
         }
     }
@@ -485,15 +486,15 @@ router.put(
             // Upload new images if provided
             if (files?.thumbnail?.[0]) {
                 updateData.thumbnailUrl = await uploadMovieFile(movieId, 'thumbnail', toStorageFile(files.thumbnail[0]));
-                console.log('📸 Thumbnail updated');
+                logger.info('Thumbnail updated');
             }
             if (files?.hero?.[0]) {
                 updateData.heroUrl = await uploadMovieFile(movieId, 'hero', toStorageFile(files.hero[0]));
-                console.log('🖼️ Hero updated');
+                logger.info('Hero updated');
             }
             if (files?.trailer?.[0]) {
                 updateData.trailerUrl = await uploadMovieFile(movieId, 'trailer', toStorageFile(files.trailer[0]));
-                console.log('🎞️ Trailer updated');
+                logger.info('Trailer updated');
             }
 
             const updatedMovie = await prisma.movie.update({
@@ -502,10 +503,10 @@ router.put(
                 include: { clips: { orderBy: { sequence: 'asc' } } },
             });
 
-            console.log(`✅ Movie ${movieId} updated`);
+            logger.info({ movieId }, 'Movie updated');
             res.json(updatedMovie);
         } catch (error) {
-            console.error('Update movie error:', error);
+            logger.error({ err: error }, '');
             res.status(500).json({ error: 'Failed to update movie' });
         }
     }
@@ -540,7 +541,7 @@ router.get('/users', async (req: Request, res: Response): Promise<void> => {
 
         res.json(users);
     } catch (error) {
-        console.error('Get users error:', error);
+        logger.error({ err: error }, '');
         res.status(500).json({ error: 'Failed to fetch users' });
     }
 });
@@ -565,10 +566,10 @@ router.delete('/users/:id', async (req: Request, res: Response): Promise<void> =
         // Cascade delete handles lists, comments, watchProgress
         await prisma.user.delete({ where: { id: userId } });
 
-        console.log(`✅ User ${userId} (${user.email}) deleted`);
+        logger.info({ userId }, 'User deleted');
         res.json({ message: 'User deleted successfully' });
     } catch (error) {
-        console.error('Delete user error:', error);
+        logger.error({ err: error }, '');
         res.status(500).json({ error: 'Failed to delete user' });
     }
 });
@@ -601,10 +602,10 @@ router.patch('/users/:id/role', async (req: Request, res: Response): Promise<voi
             },
         });
 
-        console.log(`✅ User ${userId} admin status toggled to ${updatedUser.isAdmin}`);
+        logger.info('Action completed');
         res.json(updatedUser);
     } catch (error) {
-        console.error('Toggle admin error:', error);
+        logger.error({ err: error }, '');
         res.status(500).json({ error: 'Failed to update user role' });
     }
 });
@@ -670,7 +671,7 @@ router.put('/movies/:id/clips/reorder', async (req: Request, res: Response): Pro
                 try {
                     await moveClipFile(movieId, oldSeq, newSeq);
                 } catch (err) {
-                    console.warn(`⚠️ Failed to move clip file ${oldSeq} → ${newSeq}:`, err);
+                    logger.warn('Warning');
                 }
             }
         }
@@ -680,10 +681,10 @@ router.put('/movies/:id/clips/reorder', async (req: Request, res: Response): Pro
             include: { clips: { orderBy: { sequence: 'asc' } } },
         });
 
-        console.log(`✅ Clips reordered for movie ${movieId}`);
+        logger.info('Action completed');
         res.json(updatedMovie);
     } catch (error) {
-        console.error('Reorder clips error:', error);
+        logger.error({ err: error }, '');
         res.status(500).json({ error: 'Failed to reorder clips' });
     }
 });
@@ -718,10 +719,10 @@ router.patch('/users/:id/subscription', async (req: Request, res: Response): Pro
             create: { userId, status, currentPeriodEnd },
         });
 
-        console.log(`✅ Admin set subscription for user ${userId} to ${status}`);
+        logger.info('Action completed');
         res.json({ success: true, status, currentPeriodEnd });
     } catch (error) {
-        console.error('Admin subscription update error:', error);
+        logger.error({ err: error }, '');
         res.status(500).json({ error: 'Failed to update subscription' });
     }
 });

@@ -39,6 +39,19 @@ interface AppState {
     fetchUserLists: () => Promise<void>;
     getLikedMovies: () => Movie[];
     getWatchLaterMovies: () => Movie[];
+
+    // Search History
+    recentSearches: string[];
+    addRecentSearch: (query: string) => void;
+    clearRecentSearches: () => void;
+
+    // App Config
+    freeClipLimit: number;
+    fetchConfig: () => Promise<void>;
+
+    // Preferences
+    appIcon: string;
+    setAppIcon: (icon: string) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -62,9 +75,17 @@ export const useAppStore = create<AppState>((set, get) => ({
             get().fetchSubscriptionStatus();
             return true;
         } catch (error) {
+            let errorMessage = 'Login failed';
+            if (error instanceof TypeError && error.message === 'Failed to fetch') {
+                errorMessage = 'Cannot connect to server. Please check your internet connection and try again.';
+            } else if (error instanceof Error) {
+                errorMessage = error.message === 'UNAUTHORIZED'
+                    ? 'Invalid email or password'
+                    : error.message;
+            }
             set({
                 authLoading: false,
-                authError: error instanceof Error ? error.message : 'Login failed',
+                authError: errorMessage,
             });
             return false;
         }
@@ -101,6 +122,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     checkAuth: async () => {
         set({ authLoading: true });
+        
+        // Always fetch config on startup
+        get().fetchConfig();
+
         try {
             const { isAuthenticated, user } = await api.checkAuthStatus();
             set({
@@ -240,4 +265,31 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     getLikedMovies: () => get().movies.filter(m => get().likedMovieIds.includes(m.id)),
     getWatchLaterMovies: () => get().movies.filter(m => get().watchLaterMovieIds.includes(m.id)),
+
+    // Search History State
+    recentSearches: [],
+    addRecentSearch: (query: string) => {
+        if (!query.trim()) return;
+        const normalizedQuery = query.trim();
+        set(state => {
+            const filtered = state.recentSearches.filter(s => s.toLowerCase() !== normalizedQuery.toLowerCase());
+            return {
+                recentSearches: [normalizedQuery, ...filtered].slice(0, 10)
+            };
+        });
+    },
+    clearRecentSearches: () => set({ recentSearches: [] }),
+
+    // App Config
+    freeClipLimit: 7,
+    fetchConfig: async () => {
+        const config = await api.getAppConfig();
+        if (config.FREE_CLIP_LIMIT) {
+            set({ freeClipLimit: parseInt(config.FREE_CLIP_LIMIT, 10) });
+        }
+    },
+
+    // Preferences
+    appIcon: 'red',
+    setAppIcon: (icon: string) => set({ appIcon: icon }),
 }));

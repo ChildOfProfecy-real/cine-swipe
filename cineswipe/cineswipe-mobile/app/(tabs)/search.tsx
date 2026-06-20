@@ -1,15 +1,22 @@
 import { useState, useEffect } from "react";
-import { View, Text, TextInput, ScrollView, Image, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator } from "react-native";
+import { View, Text, TextInput, ScrollView, Image, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Dimensions, ImageBackground, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Search as SearchIcon, X, TrendingUp } from "lucide-react-native";
+import { Search as SearchIcon, X, TrendingUp, ArrowLeft } from "lucide-react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { useAppStore } from "../../src/lib/store";
 import { Movie } from "../../src/types";
 import { Link } from "expo-router";
 
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+
 export default function SearchScreen() {
-    const { movies, moviesLoading, fetchMovies } = useAppStore();
+    const { movies, moviesLoading, fetchMovies, recentSearches, addRecentSearch } = useAppStore();
     const [query, setQuery] = useState("");
     const [isFocused, setIsFocused] = useState(false);
+    const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+
+    const genres = ["Action", "Sci-Fi", "Drama", "Comedy", "Thriller", "Romance", "Animation", "Horror"];
 
     // Fetch movies if not loaded yet
     useEffect(() => {
@@ -18,31 +25,33 @@ export default function SearchScreen() {
         }
     }, []);
 
-    const filteredMovies = query.length > 0
-        ? movies.filter(m =>
+    const filteredMovies = movies.filter(m => {
+        const matchesQuery = query.length === 0 || 
             m.title.toLowerCase().includes(query.toLowerCase()) ||
             m.genre.toLowerCase().includes(query.toLowerCase()) ||
-            m.description.toLowerCase().includes(query.toLowerCase())
-        )
-        : [];
+            m.description.toLowerCase().includes(query.toLowerCase());
+            
+        const matchesGenre = !selectedGenre || m.genre === selectedGenre;
+        
+        return matchesQuery && matchesGenre;
+    });
+
+    const isSearching = query.length > 0 || selectedGenre !== null;
 
     const clearSearch = () => {
         setQuery("");
+        setSelectedGenre(null);
     };
 
     const renderSearchResult = ({ item }: { item: Movie }) => (
         <Link href={`/player/${item.id}`} asChild>
-            <TouchableOpacity style={styles.resultItem}>
+            <TouchableOpacity style={styles.gridCard} activeOpacity={0.8}>
                 <Image
                     source={{ uri: item.thumbnailUrl }}
-                    style={styles.resultImage}
+                    style={styles.gridThumbnail}
                     resizeMode="cover"
                 />
-                <View style={styles.resultInfo}>
-                    <Text style={styles.resultTitle}>{item.title}</Text>
-                    <Text style={styles.resultGenre}>{item.genre}</Text>
-                    <Text style={styles.resultDesc} numberOfLines={2}>{item.description}</Text>
-                </View>
+                <Text style={styles.gridTitle} numberOfLines={1}>{item.title}</Text>
             </TouchableOpacity>
         </Link>
     );
@@ -67,12 +76,17 @@ export default function SearchScreen() {
                     <SearchIcon color="#808080" size={20} />
                     <TextInput
                         style={styles.searchInput}
-                        placeholder="Search movies, genres..."
+                        placeholder="Search short clips..."
                         placeholderTextColor="#808080"
                         value={query}
                         onChangeText={setQuery}
                         onFocus={() => setIsFocused(true)}
                         onBlur={() => setIsFocused(false)}
+                        onSubmitEditing={() => {
+                            if (query.trim().length > 0) {
+                                addRecentSearch(query);
+                            }
+                        }}
                     />
                     {query.length > 0 && (
                         <TouchableOpacity onPress={clearSearch}>
@@ -82,19 +96,28 @@ export default function SearchScreen() {
                 </View>
             </View>
 
-            {query.length > 0 ? (
+            {/* Dynamic Genre Filters Removed in favor of Trending Genres Below */}
+
+            {isSearching ? (
                 // Search Results
                 <View style={styles.resultsContainer}>
-                    <Text style={styles.resultsTitle}>
-                        {filteredMovies.length > 0
-                            ? `Results for "${query}"`
-                            : `No results for "${query}"`}
-                    </Text>
+                    <View style={styles.resultsHeader}>
+                        <TouchableOpacity onPress={clearSearch} style={styles.backButton}>
+                            <ArrowLeft color="#fff" size={24} />
+                        </TouchableOpacity>
+                        <Text style={styles.resultsTitle}>
+                            {filteredMovies.length > 0
+                                ? `Results for ${selectedGenre ? selectedGenre : ''} ${query ? `"${query}"` : ''}`.trim()
+                                : `No results found`}
+                        </Text>
+                    </View>
                     {filteredMovies.length > 0 ? (
                         <FlatList
                             data={filteredMovies}
                             renderItem={renderSearchResult}
                             keyExtractor={(item) => item.id}
+                            numColumns={2}
+                            columnWrapperStyle={styles.columnWrapper}
                             showsVerticalScrollIndicator={false}
                         />
                     ) : (
@@ -112,35 +135,47 @@ export default function SearchScreen() {
             ) : (
                 // Default: Trending Searches
                 <ScrollView showsVerticalScrollIndicator={false}>
+                    {/* Recently Searched */}
+                    {recentSearches.length > 0 && (
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitleSmall}>Recently Searched</Text>
+                            <View style={styles.recentSearchesContainer}>
+                                {recentSearches.map(term => (
+                                    <TouchableOpacity key={term} style={styles.recentChip} onPress={() => setQuery(term)}>
+                                        <Text style={styles.recentChipText}>{term}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+                    )}
+
+                    {/* Trending Genres */}
                     <View style={styles.section}>
                         <View style={styles.sectionHeader}>
-                            <TrendingUp color="#E50914" size={20} />
-                            <Text style={styles.sectionTitle}>Top Searches</Text>
+                            <TrendingUp color="#C8AA64" size={20} />
+                            <Text style={styles.sectionTitle}>Trending Genres</Text>
                         </View>
-
-                        {movies.map((movie) => (
-                            <Link key={movie.id} href={`/player/${movie.id}`} asChild>
-                                <TouchableOpacity style={styles.topSearchItem}>
-                                    <Image
-                                        source={{ uri: movie.thumbnailUrl }}
-                                        style={styles.topSearchImage}
-                                        resizeMode="cover"
-                                    />
-                                    <Text style={styles.topSearchTitle}>{movie.title}</Text>
-                                    <View style={styles.playIcon}>
-                                        <Text style={styles.playText}>▶</Text>
-                                    </View>
-                                </TouchableOpacity>
-                            </Link>
-                        ))}
-                    </View>
-
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Browse by Genre</Text>
-                        <View style={styles.genreGrid}>
-                            {["Action", "Sci-Fi", "Drama", "Comedy", "Thriller", "Romance"].map((genre) => (
-                                <TouchableOpacity key={genre} style={styles.genreChip}>
-                                    <Text style={styles.genreText}>{genre}</Text>
+                        
+                        <View style={styles.trendingGenresContainer}>
+                            {genres.map((genre, idx) => (
+                                <TouchableOpacity 
+                                    key={genre}
+                                    style={styles.largeGenreCard}
+                                    onPress={() => setSelectedGenre(genre)}
+                                    activeOpacity={0.9}
+                                >
+                                    <ImageBackground
+                                        source={{ uri: movies.find(m => m.genre === genre)?.heroUrl || movies.find(m => m.genre === genre)?.thumbnailUrl || movies[idx % movies.length]?.thumbnailUrl }}
+                                        style={styles.largeGenreImage}
+                                        imageStyle={{ borderRadius: 12 }}
+                                    >
+                                        <LinearGradient
+                                            colors={['transparent', 'rgba(0,0,0,0.8)']}
+                                            style={styles.largeGenreOverlay}
+                                        >
+                                            <Text style={styles.largeGenreTitle}>{genre}</Text>
+                                        </LinearGradient>
+                                    </ImageBackground>
                                 </TouchableOpacity>
                             ))}
                         </View>
@@ -178,10 +213,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         height: 48,
         borderWidth: 1,
-        borderColor: '#333',
+        borderColor: 'rgba(200,170,100,0.5)',
     },
     searchBarFocused: {
-        borderColor: '#E50914',
+        borderColor: '#C8AA64',
     },
     searchInput: {
         flex: 1,
@@ -192,45 +227,40 @@ const styles = StyleSheet.create({
     resultsContainer: {
         flex: 1,
         paddingHorizontal: 16,
+        paddingTop: 8,
+    },
+    resultsHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    backButton: {
+        marginRight: 12,
+        padding: 4,
     },
     resultsTitle: {
         color: '#fff',
         fontSize: 18,
-        fontWeight: '600',
-        marginBottom: 16,
-    },
-    resultItem: {
-        flexDirection: 'row',
-        marginBottom: 16,
-        backgroundColor: '#1a1a1a',
-        borderRadius: 8,
-        overflow: 'hidden',
-    },
-    resultImage: {
-        width: 100,
-        height: 140,
-        backgroundColor: '#333',
-    },
-    resultInfo: {
-        flex: 1,
-        padding: 12,
-        justifyContent: 'center',
-    },
-    resultTitle: {
-        color: '#fff',
-        fontSize: 16,
         fontWeight: 'bold',
-        marginBottom: 4,
     },
-    resultGenre: {
-        color: '#E50914',
-        fontSize: 12,
-        marginBottom: 8,
+    columnWrapper: {
+        justifyContent: 'space-between',
+        marginBottom: 16,
     },
-    resultDesc: {
-        color: '#a0a0a0',
-        fontSize: 12,
-        lineHeight: 18,
+    gridCard: {
+        width: CARD_WIDTH,
+    },
+    gridThumbnail: {
+        width: CARD_WIDTH,
+        height: CARD_WIDTH * 1.5, // Maintain aspect ratio for movie posters
+        borderRadius: 8,
+        backgroundColor: '#1a1a1a',
+    },
+    gridTitle: {
+        color: '#fff',
+        fontSize: 11,
+        marginTop: 6,
+        textAlign: 'center',
     },
     noResults: {
         color: '#808080',
@@ -253,63 +283,58 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         marginLeft: 10,
     },
-    topSearchItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#1a1a1a',
-        borderRadius: 4,
-        marginBottom: 8,
-        overflow: 'hidden',
+    trendingGenresContainer: {
+        gap: 16,
     },
-    topSearchImage: {
-        width: 120,
-        height: 70,
-        backgroundColor: '#333',
+    largeGenreCard: {
+        width: '100%',
+        height: 140,
+        borderRadius: 12,
     },
-    topSearchTitle: {
-        flex: 1,
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '500',
-        paddingHorizontal: 16,
+    largeGenreImage: {
+        width: '100%',
+        height: '100%',
+        justifyContent: 'flex-end',
     },
-    playIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: '#fff',
+    largeGenreOverlay: {
+        height: '100%',
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 16,
+        borderRadius: 12,
+        backgroundColor: 'rgba(0,0,0,0.3)', // Added dark tint to read text better
     },
-    playText: {
+    largeGenreTitle: {
         color: '#fff',
-        fontSize: 12,
+        fontSize: 28,
+        fontWeight: 'bold',
+        fontStyle: 'italic',
+        fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
+        textAlign: 'center',
+        textShadowColor: 'rgba(0,0,0,0.8)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 4,
     },
-    trendingItem: {
-        marginRight: 12,
+    sectionTitleSmall: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 16,
     },
-    trendingImage: {
-        width: 110,
-        height: 160,
-        borderRadius: 6,
-        backgroundColor: '#333',
-    },
-    genreGrid: {
+    recentSearchesContainer: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 10,
-        marginTop: 12,
     },
-    genreChip: {
-        backgroundColor: '#333',
+    recentChip: {
+        backgroundColor: '#1a1a1a',
         paddingHorizontal: 16,
-        paddingVertical: 10,
+        paddingVertical: 8,
         borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#333',
     },
-    genreText: {
-        color: '#fff',
+    recentChipText: {
+        color: '#a0a0a0',
         fontSize: 14,
     },
 });

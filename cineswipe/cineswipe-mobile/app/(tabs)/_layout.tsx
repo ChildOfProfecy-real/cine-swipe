@@ -1,14 +1,27 @@
-import { Tabs } from "expo-router";
+import { Tabs, Redirect } from "expo-router";
 import { Home, User, Film, Sparkles, Search } from "lucide-react-native";
-import { StyleSheet } from "react-native";
+import { StyleSheet, View, ActivityIndicator } from "react-native";
+import { useAppStore } from "../../src/lib/store";
 
 export default function TabsLayout() {
+    const { isAuthenticated, authLoading, isPremium } = useAppStore();
+
+    // While waiting for initial auth check to resolve, don't render the layout
+    // The global _layout.tsx handles the actual loading spinner.
+    if (authLoading) return null;
+
+    // If the user hits a deep link into the tabs but is not authenticated,
+    // redirect them instantly to the login screen.
+    if (!isAuthenticated) {
+        return <Redirect href="/login" />;
+    }
+
     return (
         <Tabs
             screenOptions={{
                 headerShown: false,
                 tabBarStyle: styles.tabBar,
-                tabBarActiveTintColor: "#fff",
+                tabBarActiveTintColor: isPremium ? "#D4AF37" : "#fff",
                 tabBarInactiveTintColor: "#808080",
                 tabBarLabelStyle: styles.tabBarLabel,
             }}
@@ -28,13 +41,6 @@ export default function TabsLayout() {
                 }}
             />
             <Tabs.Screen
-                name="movies"
-                options={{
-                    title: "Movies",
-                    tabBarIcon: ({ color }) => <Film color={color} size={22} />,
-                }}
-            />
-            <Tabs.Screen
                 name="new-popular"
                 options={{
                     title: "New & Hot",
@@ -44,7 +50,7 @@ export default function TabsLayout() {
             <Tabs.Screen
                 name="profile"
                 options={{
-                    title: "My Netflix",
+                    title: "Profile",
                     tabBarIcon: ({ color }) => <User color={color} size={22} />,
                 }}
             />
@@ -54,11 +60,15 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
     tabBar: {
-        backgroundColor: "#141414",
+        backgroundColor: "rgba(20,20,20,0.85)",
         borderTopColor: 'transparent',
-        height: 60,
-        paddingBottom: 8,
+        height: 70,
+        paddingBottom: 16,
         paddingTop: 8,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        position: 'absolute',
+        elevation: 0,
     },
     tabBarLabel: {
         fontSize: 10,

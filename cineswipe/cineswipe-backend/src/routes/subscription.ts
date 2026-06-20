@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import logger from '../lib/logger';
 import { authMiddleware } from '../middleware/auth';
 import {
     createRazorpaySubscription,
@@ -48,7 +49,7 @@ router.get('/status', authMiddleware, async (req: Request, res: Response): Promi
             freeClipLimit: FREE_CLIP_LIMIT,
         });
     } catch (error) {
-        console.error('Subscription status error:', error);
+        logger.error({ err: error }, 'Subscription status error');
         res.status(500).json({ error: 'Failed to fetch subscription status' });
     }
 });
@@ -100,7 +101,7 @@ router.post('/create', authMiddleware, async (req: Request, res: Response): Prom
             description: '₹50/month — Unlimited movies',
         });
     } catch (error) {
-        console.error('Create subscription error:', error);
+        logger.error({ err: error }, 'Create subscription error');
         res.status(500).json({ error: 'Failed to create subscription' });
     }
 });
@@ -160,7 +161,7 @@ router.post('/verify', authMiddleware, async (req: Request, res: Response): Prom
             },
         });
 
-        console.log(`✅ Subscription activated for user ${userId}`);
+        logger.info({ userId }, 'Subscription activated');
 
         res.json({
             status: 'ACTIVE',
@@ -168,7 +169,7 @@ router.post('/verify', authMiddleware, async (req: Request, res: Response): Prom
             currentPeriodEnd: subscription.currentPeriodEnd,
         });
     } catch (error) {
-        console.error('Verify subscription error:', error);
+        logger.error({ err: error }, 'Verify subscription error');
         res.status(500).json({ error: 'Failed to verify payment' });
     }
 });
@@ -183,7 +184,7 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
         const rawBody = (req as any).rawBody || JSON.stringify(req.body);
 
         if (!signature || !verifyWebhookSignature(rawBody, signature)) {
-            console.warn('⚠️ Invalid webhook signature');
+            logger.warn('Invalid webhook signature');
             res.status(400).json({ error: 'Invalid webhook signature' });
             return;
         }
@@ -191,7 +192,7 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
         const event = req.body.event as string;
         const payload = req.body.payload;
 
-        console.log(`📩 Razorpay webhook: ${event}`);
+        logger.info({ event }, 'Razorpay webhook received');
 
         switch (event) {
             case 'subscription.activated':
@@ -208,7 +209,7 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
                 });
 
                 if (!subscription) {
-                    console.warn(`⚠️ No subscription found for razorpaySubId: ${subId}`);
+                    logger.warn({ subId }, 'No subscription found for razorpaySubId');
                     break;
                 }
 
@@ -242,7 +243,7 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
                     }
                 }
 
-                console.log(`✅ Subscription renewed for user ${subscription.userId}`);
+                logger.info({ userId: subscription.userId }, 'Subscription renewed');
                 break;
             }
 
@@ -257,7 +258,7 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
                     data: { status: 'PAST_DUE' },
                 });
 
-                console.log(`⚠️ Subscription halted: ${subId}`);
+                logger.warn({ subId }, 'Subscription halted');
                 break;
             }
 
@@ -271,18 +272,18 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
                     data: { status: 'CANCELLED' },
                 });
 
-                console.log(`🚫 Subscription cancelled: ${subId}`);
+                logger.info({ subId }, 'Subscription cancelled');
                 break;
             }
 
             default:
-                console.log(`ℹ️ Unhandled webhook event: ${event}`);
+                logger.info({ event }, 'Unhandled webhook event');
         }
 
         // Always respond 200 to Razorpay (even for unhandled events)
         res.status(200).json({ received: true });
     } catch (error) {
-        console.error('Webhook error:', error);
+        logger.error({ err: error }, 'Webhook error');
         // Still respond 200 to prevent Razorpay retries for processing errors
         res.status(200).json({ received: true });
     }
@@ -304,7 +305,7 @@ router.post('/cancel-pending', authMiddleware, async (req: Request, res: Respons
                 // Cancel it immediately on Razorpay
                 await cancelRazorpaySubscription(subscription.razorpaySubId);
             } catch (err) {
-                console.warn('Razorpay cancel API error (may already be cancelled or incomplete):', err);
+                logger.warn({ err }, 'Razorpay cancel API error (may already be cancelled)');
             }
 
             // Remove the Razorpay ID so we can generate a new one next time
@@ -313,12 +314,12 @@ router.post('/cancel-pending', authMiddleware, async (req: Request, res: Respons
                 data: { razorpaySubId: null, razorpayPlanId: null },
             });
 
-            console.log(`🚫 User ${userId} cancelled pending subscription ${subscription.razorpaySubId}`);
+            logger.info({ userId, subId: subscription.razorpaySubId }, 'Pending subscription cancelled');
         }
 
         res.json({ message: 'Pending subscription cancelled successfully' });
     } catch (error) {
-        console.error('Cancel pending subscription error:', error);
+        logger.error({ err: error }, 'Cancel pending subscription error');
         res.status(500).json({ error: 'Failed to cancel pending subscription' });
     }
 });
@@ -343,7 +344,7 @@ router.post('/cancel', authMiddleware, async (req: Request, res: Response): Prom
             try {
                 await cancelRazorpaySubscription(subscription.razorpaySubId);
             } catch (err) {
-                console.warn('Razorpay cancel API error (may already be cancelled):', err);
+                logger.warn({ err }, 'Razorpay cancel API error (may already be cancelled)');
             }
         }
 
@@ -353,7 +354,7 @@ router.post('/cancel', authMiddleware, async (req: Request, res: Response): Prom
             data: { status: 'CANCELLED' },
         });
 
-        console.log(`🚫 User ${userId} cancelled subscription`);
+        logger.info({ userId }, 'User cancelled subscription');
 
         res.json({
             status: 'CANCELLED',
@@ -362,7 +363,7 @@ router.post('/cancel', authMiddleware, async (req: Request, res: Response): Prom
             message: 'Subscription cancelled. You will retain access until the end of your billing period.',
         });
     } catch (error) {
-        console.error('Cancel subscription error:', error);
+        logger.error({ err: error }, 'Cancel subscription error');
         res.status(500).json({ error: 'Failed to cancel subscription' });
     }
 });

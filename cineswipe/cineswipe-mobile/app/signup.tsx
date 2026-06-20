@@ -49,18 +49,10 @@ export default function SignUpScreen() {
         setLoading(false);
 
         if (result.success) {
-            if (Platform.OS === 'web') {
-                window.alert(result.message);
-            } else {
-                Alert.alert("Success", result.message);
-            }
+            Alert.alert("Success", result.message);
             router.replace("/(tabs)/home");
         } else {
-            if (Platform.OS === 'web') {
-                window.alert(result.message);
-            } else {
-                Alert.alert("Registration Failed", result.message);
-            }
+            Alert.alert("Registration Failed", result.message);
         }
     };
 

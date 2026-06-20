@@ -3,51 +3,54 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
-  id            String          @id @default(cuid())
-  email         String          @unique
+  id            String               @id @default(cuid())
+  email         String               @unique
   password      String
   name          String?
-  isAdmin       Boolean         @default(false)
-  lists         UserList[] 
+  isAdmin       Boolean              @default(false)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  emailVerified Boolean              @default(false)
   comments      Comment[]
-  watchProgress WatchProgress[]
-  subscription  Subscription?
+  resetTokens   PasswordResetToken[]
   payments      Payment[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  subscription  Subscription?
+  lists         UserList[]
+  watchProgress WatchProgress[]
 }
 
 model Movie {
-  id           String          @id @default(cuid())
-  title        String
-  description  String
-  thumbnailUrl String
-  heroUrl      String?
-  trailerUrl   String?
-  genre        String
-  clips        Clip[]
-  lists        UserList[]
-  comments     Comment[]
+  id            String          @id @default(cuid())
+  title         String
+  description   String
+  thumbnailUrl  String
+  heroUrl       String?
+  trailerUrl    String?
+  genre         String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  clips         Clip[]
+  comments      Comment[]
+  lists         UserList[]
   watchProgress WatchProgress[]
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
 }
 
 model WatchProgress {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   movieId   String
-  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
   clipId    String?
-  clip      Clip?    @relation(fields: [clipId], references: [id], onDelete: SetNull)
   timestamp Float    @default(0)
   updatedAt DateTime @updatedAt
+  clip      Clip?    @relation(fields: [clipId], references: [id])
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, movieId])
 }
@@ -55,12 +58,12 @@ model WatchProgress {
 model Clip {
   id            String          @id @default(cuid())
   movieId       String
-  movie         Movie           @relation(fields: [movieId], references: [id], onDelete: Cascade)
   videoUrl      String
   sequence      Int
   duration      Int
-  watchProgress WatchProgress[]
   createdAt     DateTime        @default(now())
+  movie         Movie           @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  watchProgress WatchProgress[]
 
   @@unique([movieId, sequence])
   @@index([movieId])
@@ -69,20 +72,20 @@ model Clip {
 model Comment {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   movieId   String
-  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
   content   String
   createdAt DateTime @default(now())
+  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UserList {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  movieId   String
-  movie     Movie    @relation(fields: [movieId], references: [id], onDelete: Cascade)
-  type      String   // LIKED, WATCH_LATER
+  id      String @id @default(cuid())
+  userId  String
+  movieId String
+  type    String
+  movie   Movie  @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, movieId, type])
 }
@@ -90,22 +93,40 @@ model UserList {
 model Subscription {
   id               String    @id @default(cuid())
   userId           String    @unique
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   razorpaySubId    String?   @unique
   razorpayPlanId   String?
-  status           String    @default("FREE") // FREE, ACTIVE, PAST_DUE, CANCELLED, EXPIRED
+  status           String    @default("FREE")
   currentPeriodEnd DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Payment {
   id                String   @id @default(cuid())
   userId            String
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   razorpayPaymentId String?  @unique
   razorpayOrderId   String?
-  amount            Int      // Amount in paise (5000 = ₹50)
-  status            String   // CREATED, PAID, FAILED
+  amount            Int
+  status            String
   createdAt         DateTime @default(now())
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+}
+
+model AppConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }

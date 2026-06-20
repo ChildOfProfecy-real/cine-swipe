@@ -1,12 +1,16 @@
 import { useRef, useState, useEffect, useCallback } from "react";
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Dimensions, Platform, Share, useWindowDimensions, Alert } from "react-native";
-import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Dimensions, Platform, Share, useWindowDimensions, Alert, Animated, TouchableWithoutFeedback } from "react-native";
+import { useLocalSearchParams, useRouter, useNavigation, useFocusEffect } from "expo-router";
 import { ResizeMode, Video, AVPlaybackStatus } from "expo-av";
-import { ArrowLeft, Heart, Plus, Check, Share2 } from "lucide-react-native";
+import { BlurView } from "expo-blur";
+import { ArrowLeft, Heart, Plus, Check, Share2, Play, Pause, ListVideo } from "lucide-react-native";
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { StatusBar } from 'expo-status-bar';
 import { useAppStore } from "../../src/lib/store";
-import { getMovie, saveWatchProgress, FREE_CLIP_LIMIT } from "../../src/lib/api";
+import { getMovie, saveWatchProgress, getMovieClipProgress } from "../../src/lib/api";
 import { Movie, Clip } from "../../src/types";
 import { ActivityIndicator } from "react-native";
+import { EpisodeSheet } from "../../src/components/EpisodeSheet";
 
 // Get initial screen dimensions (will be updated dynamically in component)
 const initialDimensions = Dimensions.get('screen');
@@ -24,10 +28,13 @@ const ClipPlayer = ({
     onWatchLater,
     onBack,
     onShare,
+    onOpenEpisodes,
     totalClips,
     screenWidth,
     screenHeight,
-    isPremium
+    isPremium,
+    freeClipLimit,
+    shouldRenderVideo
 }: {
     clip: Clip;
     index: number;
@@ -40,40 +47,101 @@ const ClipPlayer = ({
     onWatchLater: (e?: any) => void;
     onBack: (e?: any) => void;
     onShare: (e?: any) => void;
+    onOpenEpisodes: (e?: any) => void;
     totalClips: number;
     screenWidth: number;
     screenHeight: number;
     isPremium: boolean;
+    freeClipLimit: number;
+    shouldRenderVideo?: boolean;
 }) => {
     const videoRef = useRef<Video>(null);
+    const [isBuffering, setIsBuffering] = useState(true);
+    const [isPaused, setIsPaused] = useState(false);
 
-    // Control playback based on isActive prop
     useEffect(() => {
-        const controlVideo = async () => {
-            if (!videoRef.current) return;
-
+        const handlePlayback = async () => {
             try {
-                if (isActive) {
-                    await videoRef.current.setPositionAsync(0);
+                if (!videoRef.current) return;
+                
+                if (!isActive) {
+                    setIsPaused(false);
+                    await videoRef.current.pauseAsync();
+                } else if (!isPaused) {
                     await videoRef.current.playAsync();
                 } else {
                     await videoRef.current.pauseAsync();
                 }
-            } catch (e) {
-                console.log('Video control error:', e);
+            } catch (error) {
+                // Ignore EXVideo registry errors on unmount/remount
             }
         };
 
-        controlVideo();
-    }, [isActive]);
+        handlePlayback();
+    }, [isActive, isPaused]);
 
     const onPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-        if (status.isLoaded && status.didJustFinish && isActive) {
+        if (!status.isLoaded) {
+            setIsBuffering(true);
+            return;
+        }
+
+        setIsBuffering(status.isBuffering);
+
+        if (status.didJustFinish && isActive) {
             onFinished();
         }
     };
 
+    // UI Fading Logic
+    const uiOpacity = useRef(new Animated.Value(1)).current;
+    const fadeTimeout = useRef<NodeJS.Timeout | null>(null);
+
+    const resetFadeTimer = useCallback(() => {
+        // Show UI
+        Animated.timing(uiOpacity, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+        }).start();
+
+        if (fadeTimeout.current) clearTimeout(fadeTimeout.current);
+
+        if (isActive && !isPaused) {
+            fadeTimeout.current = setTimeout(() => {
+                Animated.timing(uiOpacity, {
+                    toValue: 0,
+                    duration: 500,
+                    useNativeDriver: true,
+                }).start();
+            }, 3000); // 3 seconds before fade out
+        }
+    }, [isActive, isPaused, uiOpacity]);
+
+    useEffect(() => {
+        resetFadeTimer();
+        return () => {
+            if (fadeTimeout.current) clearTimeout(fadeTimeout.current);
+        };
+    }, [isActive, isPaused, resetFadeTimer]);
+
+    const tapTimeout = useRef<NodeJS.Timeout | null>(null);
+
+    const handleTap = () => {
+        if (tapTimeout.current) {
+            clearTimeout(tapTimeout.current);
+            tapTimeout.current = null;
+            // Future double tap like
+        } else {
+            tapTimeout.current = setTimeout(() => {
+                tapTimeout.current = null;
+                setIsPaused(prev => !prev);
+            }, 250);
+        }
+    };
+
     // Dynamic styles based on screen dimensions
+    const isLandscape = screenWidth > screenHeight;
     const dynamicStyles = {
         clipContainer: {
             width: screenWidth,
@@ -98,71 +166,136 @@ const ClipPlayer = ({
             width: screenWidth,
             height: screenHeight,
         },
+        topNav: {
+            position: 'absolute' as const,
+            top: isLandscape ? 16 : (Platform.OS === 'ios' ? 60 : 40),
+            left: 0,
+            right: 0,
+            paddingHorizontal: isLandscape ? 32 : 16,
+            flexDirection: 'row' as const,
+            alignItems: 'center' as const,
+            justifyContent: 'space-between' as const,
+            zIndex: 10,
+        },
+        rightButtons: {
+            position: 'absolute' as const,
+            bottom: isLandscape ? 40 : (Platform.OS === 'ios' ? 120 : 100),
+            right: isLandscape ? 32 : 16,
+            alignItems: 'center' as const,
+            gap: 20,
+            zIndex: 10,
+        },
+        bottomInfo: {
+            position: 'absolute' as const,
+            bottom: isLandscape ? 40 : (Platform.OS === 'ios' ? 120 : 100),
+            left: isLandscape ? 32 : 16,
+            width: isLandscape ? '60%' : '70%',
+            zIndex: 10,
+        }
     };
 
     return (
-        <View style={dynamicStyles.clipContainer}>
-            {/* Video layer - doesn't capture touches */}
-            <View style={dynamicStyles.videoContainer} pointerEvents="none">
-                <Video
-                    ref={videoRef}
-                    source={{ uri: clip.videoUrl }}
-                    rate={1.0}
-                    volume={1.0}
-                    isMuted={false}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay={isActive}
-                    isLooping={false}
-                    style={dynamicStyles.video}
-                    useNativeControls={false}
-                    onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-                />
-            </View>
-
-            {/* Top Navigation */}
-            <View style={styles.topNav} pointerEvents="box-none">
-                <TouchableOpacity onPress={onBack} style={styles.backButton} activeOpacity={0.7}>
-                    <ArrowLeft color="white" size={24} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={onShare} style={styles.shareButton} activeOpacity={0.7}>
-                    <Share2 color="white" size={22} />
-                </TouchableOpacity>
-            </View>
-
-            {/* Right Side Buttons */}
-            <View style={styles.rightButtons} pointerEvents="box-none">
-                <TouchableOpacity style={styles.actionButton} onPress={onLike} activeOpacity={0.7}>
-                    <Heart
-                        color={liked ? "#E50914" : "white"}
-                        fill={liked ? "#E50914" : "transparent"}
-                        size={30}
-                    />
-                    <Text style={[styles.actionText, liked && styles.activeText]}>
-                        {liked ? "Liked" : "Like"}
-                    </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.actionButton} onPress={onWatchLater} activeOpacity={0.7}>
-                    {inWatchLater ? (
-                        <Check color="#00ff00" size={30} />
-                    ) : (
-                        <Plus color="white" size={30} />
+        <TouchableWithoutFeedback onPress={handleTap}>
+            <View style={dynamicStyles.clipContainer}>
+                {/* Video layer - doesn't capture touches */}
+                <View style={dynamicStyles.videoContainer} pointerEvents="none">
+                    {shouldRenderVideo !== false && (
+                        <Video
+                            ref={videoRef}
+                            source={{ uri: clip.videoUrl }}
+                            rate={1.0}
+                            volume={1.0}
+                            isMuted={false}
+                            resizeMode={ResizeMode.CONTAIN}
+                            shouldPlay={isActive && !isPaused}
+                            isLooping={false}
+                            style={dynamicStyles.video}
+                            useNativeControls={false}
+                            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+                            onLoadStart={() => setIsBuffering(true)}
+                            onReadyForDisplay={() => setIsBuffering(false)}
+                            progressUpdateIntervalMillis={500}
+                        />
                     )}
-                    <Text style={[styles.actionText, inWatchLater && styles.activeTextGreen]}>
-                        {inWatchLater ? "Added" : "My List"}
-                    </Text>
-                </TouchableOpacity>
-            </View>
+                    {isBuffering && (
+                        <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' }]}>
+                            <ActivityIndicator size="large" color="#E50914" />
+                        </View>
+                    )}
+                    {isPaused && !isBuffering && (
+                        <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' }]}>
+                            <Animated.View style={{ opacity: uiOpacity }}>
+                                <Play fill="white" size={72} color="white" />
+                            </Animated.View>
+                        </View>
+                    )}
+                </View>
 
-            {/* Bottom Info */}
-            <View style={styles.bottomInfo} pointerEvents="none">
-                <Text style={styles.movieTitle}>{movie.title}</Text>
-                <Text style={styles.clipInfo}>
-                    Clip {index + 1} of {totalClips} • {movie.genre}
-                    {!isPremium && index + 1 >= FREE_CLIP_LIMIT ? ' • 🔒 Premium' : ''}
-                </Text>
+                {/* Top Navigation */}
+                <Animated.View style={[dynamicStyles.topNav, { opacity: uiOpacity }]} pointerEvents="box-none">
+                    <TouchableOpacity onPress={onBack} style={styles.backButton} activeOpacity={0.7}>
+                        <BlurView intensity={30} tint="dark" style={styles.iconBlur}>
+                            <ArrowLeft color="white" size={24} />
+                        </BlurView>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={onShare} style={styles.shareButton} activeOpacity={0.7}>
+                        <BlurView intensity={30} tint="dark" style={styles.iconBlur}>
+                            <Share2 color="white" size={22} />
+                        </BlurView>
+                    </TouchableOpacity>
+                </Animated.View>
+
+                {/* Right Side Buttons */}
+                <Animated.View style={[dynamicStyles.rightButtons, { opacity: uiOpacity }]} pointerEvents="box-none">
+                    <TouchableOpacity onPress={onLike} activeOpacity={0.7}>
+                        <BlurView intensity={40} tint="dark" style={styles.actionBlur}>
+                            <Heart
+                                color={liked ? (isPremium ? "#D4AF37" : "#E50914") : "white"}
+                                fill={liked ? (isPremium ? "#D4AF37" : "#E50914") : "transparent"}
+                                size={26}
+                            />
+                        </BlurView>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={onWatchLater} activeOpacity={0.7}>
+                        <BlurView intensity={40} tint="dark" style={styles.actionBlur}>
+                            {inWatchLater ? (
+                                <Check color="#00ff00" size={28} />
+                            ) : (
+                                <Plus color="white" size={28} />
+                            )}
+                        </BlurView>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={onOpenEpisodes} activeOpacity={0.7}>
+                        <BlurView intensity={40} tint="dark" style={styles.actionBlur}>
+                            <ListVideo color="white" size={24} />
+                        </BlurView>
+                    </TouchableOpacity>
+                </Animated.View>
+
+                {/* Bottom Info */}
+                <Animated.View style={[dynamicStyles.bottomInfo, { opacity: uiOpacity }]} pointerEvents="box-none">
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                        <Text style={styles.movieTitle}>{movie.title}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <TouchableOpacity onPress={() => setIsPaused(!isPaused)} style={{ marginRight: 10 }}>
+                            {isPaused ? <Play color="white" fill="white" size={20} /> : <Pause color="white" fill="white" size={20} />}
+                        </TouchableOpacity>
+                        <Text style={styles.clipInfo}>
+                            Clip {index + 1} of {totalClips} • {movie.genre}
+                            {!isPremium && index + 1 >= freeClipLimit ? ' • 🔒 Premium' : ''}
+                        </Text>
+                    </View>
+                    {isPremium && index === 0 && (
+                        <View style={{marginTop: 8, backgroundColor: 'rgba(212, 175, 55, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#D4AF37'}}>
+                            <Text style={{color: '#D4AF37', fontSize: 12, fontWeight: 'bold'}}>✨ Premium Unlocked</Text>
+                        </View>
+                    )}
+                </Animated.View>
             </View>
-        </View>
+        </TouchableWithoutFeedback>
     );
 };
 
@@ -184,8 +317,26 @@ export default function PlayerScreen() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [hasScrolledToInitial, setHasScrolledToInitial] = useState(false);
+    const [episodeSheetVisible, setEpisodeSheetVisible] = useState(false);
+    const [watchedIndices, setWatchedIndices] = useState<Set<number>>(new Set());
+    const [isScreenFocused, setIsScreenFocused] = useState(true);
+    const hasPushedPaywall = useRef(false);
 
-    const { toggleLike, toggleWatchLater, isLiked, isInWatchLater, movies, isAuthenticated, isPremium } = useAppStore();
+    useFocusEffect(
+        useCallback(() => {
+            setIsScreenFocused(true);
+            // Reset paywall flag when screen is focused
+            hasPushedPaywall.current = false;
+            
+            ScreenOrientation.unlockAsync();
+            return () => {
+                setIsScreenFocused(false);
+                ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+            };
+        }, [])
+    );
+
+    const { toggleLike, toggleWatchLater, isLiked, isInWatchLater, movies, isAuthenticated, isPremium, freeClipLimit } = useAppStore();
     const liked = isLiked(movieId);
     const inWatchLater = isInWatchLater(movieId);
 
@@ -228,6 +379,19 @@ export default function PlayerScreen() {
         }
     }, [movie, initialClipIndex, hasScrolledToInitial]);
 
+    // Re-snap to current clip after dimension change
+    useEffect(() => {
+        if (movie && movie.clips && hasScrolledToInitial) {
+            const timeout = setTimeout(() => {
+                flatListRef.current?.scrollToIndex({ 
+                    index: activeClipIndex, 
+                    animated: false 
+                });
+            }, 150);
+            return () => clearTimeout(timeout);
+        }
+    }, [screenWidth, screenHeight, activeClipIndex, movie, hasScrolledToInitial]);
+
     const handleLike = useCallback((e: any) => {
         e?.stopPropagation?.();
         e?.preventDefault?.();
@@ -254,6 +418,35 @@ export default function PlayerScreen() {
         toggleWatchLater(movieId);
     }, [movieId, toggleWatchLater, isAuthenticated, router]);
 
+    const handleOpenEpisodes = useCallback(async (e?: any) => {
+        e?.stopPropagation?.();
+        if (!isAuthenticated) {
+            Alert.alert('Sign In Required', 'Please log in to track episode progress.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign In', onPress: () => router.push('/login') },
+            ]);
+            return;
+        }
+
+        try {
+            const progress = await getMovieClipProgress(movieId);
+            const watched = new Set<number>();
+            progress.clips.forEach((clip, index) => {
+                if (clip.watched) watched.add(index);
+            });
+            watched.add(activeClipIndex); // current is also watched
+            
+            setWatchedIndices(watched);
+        } catch (err) {
+            console.error('Failed to fetch progress:', err);
+            const watched = new Set<number>();
+            watched.add(activeClipIndex);
+            setWatchedIndices(watched);
+        }
+
+        setEpisodeSheetVisible(true);
+    }, [isAuthenticated, router, movieId, activeClipIndex]);
+
     // Save watch progress when leaving or changing clips
     const saveCurrentProgress = useCallback(async () => {
         if (!isAuthenticated || !movie || !movie.clips || movie.clips.length === 0) return;
@@ -268,6 +461,37 @@ export default function PlayerScreen() {
             console.error('Failed to save watch progress:', error);
         }
     }, [isAuthenticated, movie, movieId, activeClipIndex]);
+
+    const handleSelectClip = useCallback((index: number) => {
+        setEpisodeSheetVisible(false);
+        if (!isPremium && index >= freeClipLimit) {
+            if (!hasPushedPaywall.current) {
+                hasPushedPaywall.current = true;
+                saveCurrentProgress();
+                router.push({
+                    pathname: '/paywall',
+                    params: {
+                        movieId,
+                        movieTitle: movie?.title || '',
+                        clipIndex: String(index),
+                        thumbnailUrl: movie?.thumbnailUrl || '',
+                    },
+                });
+            }
+            return;
+        }
+
+        const clipsLength = movie?.clips?.length || 1;
+        if (index < clipsLength) {
+            flatListRef.current?.scrollToIndex({ index, animated: true });
+            setActiveClipIndex(index);
+        }
+    }, [isPremium, movieId, movie, router, saveCurrentProgress, freeClipLimit]);
+
+    // Save progress whenever activeClipIndex changes
+    useEffect(() => {
+        saveCurrentProgress();
+    }, [activeClipIndex, saveCurrentProgress]);
 
     const handleBack = useCallback(async (e: any) => {
         e?.stopPropagation?.();
@@ -320,25 +544,27 @@ export default function PlayerScreen() {
     }
 
     const clips = movie.clips && movie.clips.length > 0 ? movie.clips : [
-        { id: 'placeholder', movieId: movie.id, videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', sequence: 1, duration: 120 }
+        { id: 'placeholder', movieId: movie.id, videoUrl: 'https://www.w3schools.com/html/mov_bbb.mp4', sequence: 1, duration: 120 }
     ];
 
     const goToNextClip = (currentIndex: number) => {
         const nextIndex = currentIndex + 1;
 
-        // Paywall check: free users limited to FREE_CLIP_LIMIT clips
-        if (!isPremium && nextIndex >= FREE_CLIP_LIMIT) {
-            // Save progress before showing paywall
-            saveCurrentProgress();
-            router.push({
-                pathname: '/paywall',
-                params: {
-                    movieId,
-                    movieTitle: movie?.title || '',
-                    clipIndex: String(nextIndex),
-                    thumbnailUrl: movie?.thumbnailUrl || '',
-                },
-            });
+        // Paywall check: free users limited to freeClipLimit clips
+        if (!isPremium && nextIndex >= freeClipLimit) {
+            if (!hasPushedPaywall.current) {
+                hasPushedPaywall.current = true;
+                saveCurrentProgress();
+                router.push({
+                    pathname: '/paywall',
+                    params: {
+                        movieId,
+                        movieTitle: movie?.title || '',
+                        clipIndex: String(nextIndex),
+                        thumbnailUrl: movie?.thumbnailUrl || '',
+                    },
+                });
+            }
             return;
         }
 
@@ -353,20 +579,23 @@ export default function PlayerScreen() {
         const index = Math.round(offsetY / screenHeight);
 
         // Block scroll past free limit for non-premium users
-        if (!isPremium && index >= FREE_CLIP_LIMIT) {
-            flatListRef.current?.scrollToIndex({ index: FREE_CLIP_LIMIT - 1, animated: true });
+        if (!isPremium && index >= freeClipLimit) {
+            flatListRef.current?.scrollToIndex({ index: freeClipLimit - 1, animated: true });
 
             // Show paywall when user attempts to swipe past the limit limit
-            saveCurrentProgress();
-            router.push({
-                pathname: '/paywall',
-                params: {
-                    movieId,
-                    movieTitle: movie?.title || '',
-                    clipIndex: String(index),
-                    thumbnailUrl: movie?.thumbnailUrl || '',
-                },
-            });
+            if (!hasPushedPaywall.current) {
+                hasPushedPaywall.current = true;
+                saveCurrentProgress();
+                router.push({
+                    pathname: '/paywall',
+                    params: {
+                        movieId,
+                        movieTitle: movie?.title || '',
+                        clipIndex: String(index),
+                        thumbnailUrl: movie?.thumbnailUrl || '',
+                    },
+                });
+            }
             return;
         }
 
@@ -375,18 +604,21 @@ export default function PlayerScreen() {
         }
     };
 
+    const isLandscape = screenWidth > screenHeight;
+
     return (
         <View style={styles.container}>
+            <StatusBar hidden={isLandscape} />
             <FlatList
                 ref={flatListRef}
                 data={clips}
                 extraData={activeClipIndex}
                 renderItem={({ item, index }) => (
                     <ClipPlayer
-                        key={`${item.id}-${activeClipIndex}`}
                         clip={item}
                         index={index}
-                        isActive={index === activeClipIndex}
+                        isActive={isScreenFocused && index === activeClipIndex}
+                        shouldRenderVideo={Math.abs(index - activeClipIndex) <= 1}
                         onFinished={() => goToNextClip(index)}
                         movie={movie}
                         liked={liked}
@@ -395,10 +627,12 @@ export default function PlayerScreen() {
                         onWatchLater={handleWatchLater}
                         onBack={handleBack}
                         onShare={handleShare}
+                        onOpenEpisodes={handleOpenEpisodes}
                         totalClips={clips.length}
                         screenWidth={screenWidth}
                         screenHeight={screenHeight}
                         isPremium={isPremium}
+                        freeClipLimit={freeClipLimit}
                     />
                 )}
                 keyExtractor={(item, index) => `${item.id}-${index}`}
@@ -418,6 +652,19 @@ export default function PlayerScreen() {
                 initialNumToRender={2}
                 maxToRenderPerBatch={3}
                 windowSize={5}
+            />
+            <EpisodeSheet
+                visible={episodeSheetVisible}
+                onClose={() => setEpisodeSheetVisible(false)}
+                clips={clips}
+                activeIndex={activeClipIndex}
+                watchedIndices={watchedIndices}
+                onSelectClip={handleSelectClip}
+                movieTitle={movie.title}
+                movieThumbnail={movie.thumbnailUrl || ''}
+                isLandscape={isLandscape}
+                freeClipLimit={freeClipLimit}
+                isPremium={isPremium}
             />
         </View>
     );
@@ -461,12 +708,14 @@ const styles = StyleSheet.create({
         zIndex: 10,
     },
     backButton: {
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        padding: 10,
         borderRadius: 25,
+        overflow: 'hidden',
     },
     shareButton: {
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: 25,
+        overflow: 'hidden',
+    },
+    iconBlur: {
         padding: 10,
         borderRadius: 25,
     },
@@ -478,22 +727,13 @@ const styles = StyleSheet.create({
         gap: 20,
         zIndex: 10,
     },
-    actionButton: {
+    actionBlur: {
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        justifyContent: 'center',
         alignItems: 'center',
-    },
-    actionText: {
-        color: '#fff',
-        fontSize: 11,
-        marginTop: 4,
-        textShadowColor: 'rgba(0,0,0,0.8)',
-        textShadowOffset: { width: 1, height: 1 },
-        textShadowRadius: 3,
-    },
-    activeText: {
-        color: '#E50914',
-    },
-    activeTextGreen: {
-        color: '#00ff00',
+        overflow: 'hidden',
     },
     bottomInfo: {
         position: 'absolute',

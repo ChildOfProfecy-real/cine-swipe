@@ -1,10 +1,56 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import { router } from 'expo-router';
+import Constants from 'expo-constants';
 import { Movie, User, PaginatedMovies } from '../types';
 
 // API Configuration
-const API_BASE_URL = 'http://192.168.0.105:3001'; // Update to your machine's local IP
+// Priority: EXPO_PUBLIC_API_URL env var (production builds) > platform-specific defaults
+const getApiBaseUrl = (): string => {
+    // 1. Env var from eas.json (used in EAS production/preview builds)
+    if (process.env.EXPO_PUBLIC_API_URL) {
+        return process.env.EXPO_PUBLIC_API_URL;
+    }
+    // 2. On web, always use localhost (browser runs on the same machine as dev server)
+    if (Platform.OS === 'web') {
+        return 'http://localhost:3001';
+    }
+
+    // 3. Ultra-reliable Dynamic IP resolution for development
+    // NativeModules.SourceCode.scriptURL contains the exact URL the JS bundle was loaded from
+    // Example: "http://192.168.1.14:8081/index.bundle?..."
+    if (__DEV__ && NativeModules.SourceCode && NativeModules.SourceCode.scriptURL) {
+        try {
+            const scriptUrl = NativeModules.SourceCode.scriptURL;
+            const match = scriptUrl.match(/^https?:\/\/([^:/]+)/);
+            if (match && match[1]) {
+                const ip = match[1];
+                if (ip !== 'localhost' && ip !== '127.0.0.1' && ip !== '10.0.2.2') {
+                    console.log('Dynamically resolved backend IP from scriptURL:', ip);
+                    return `http://${ip}:3001`;
+                }
+            }
+        } catch (e) {
+            console.log('Failed to parse scriptURL', e);
+        }
+    }
+    
+    // 4. Fallback to Expo Constants
+    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.hostUri;
+    if (hostUri) {
+        const ip = hostUri.split(':')[0];
+        if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+            console.log('Dynamically resolved backend IP from Expo:', ip);
+            return `http://${ip}:3001`;
+        }
+    }
+
+    // 4. Fallback to app.json extra config or localhost
+    console.log('Falling back to app.json extra apiUrl');
+    return Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3001';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 const TOKEN_KEY = 'cineswipe_auth_token';
 
 // ============== Token Management ==============
@@ -39,21 +85,28 @@ async function apiRequest<T>(
         ...options.headers,
     };
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        ...options,
-        headers,
-    });
+    let response: Response;
+    try {
+        response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            ...options,
+            headers,
+        });
+    } catch (fetchError) {
+        // Network error — server unreachable
+        throw new TypeError('Failed to fetch');
+    }
 
     const data = await response.json();
 
     if (!response.ok) {
-        // Handle expired or invalid tokens by redirecting to login
-        if (response.status === 401) {
+        // Handle expired or invalid tokens — but NOT on auth routes
+        // A 401 on /auth/login means "wrong credentials", not "expired session"
+        if (response.status === 401 && !endpoint.startsWith('/auth/')) {
             await clearToken();
             router.replace('/login');
             throw new Error('UNAUTHORIZED');
         }
-        throw new Error(data.error || 'API request failed');
+        throw new Error(data.error || `Request failed (${response.status})`);
     }
 
     return data;
@@ -91,6 +144,25 @@ export async function registerAPI(
 
 export async function logoutAPI(): Promise<void> {
     await clearToken();
+}
+
+// ============== Password Reset API ==============
+
+export async function forgotPasswordAPI(email: string): Promise<{ message: string }> {
+    return apiRequest<{ message: string }>('/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+    });
+}
+
+export async function resetPasswordAPI(
+    token: string,
+    newPassword: string,
+): Promise<{ message: string }> {
+    return apiRequest<{ message: string }>('/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ token, newPassword }),
+    });
 }
 
 export async function getCurrentUser(): Promise<User> {
@@ -167,6 +239,20 @@ export async function getMovieStatus(movieId: string): Promise<MovieStatus> {
 
 // ============== Continue Watching API ==============
 
+export interface MovieClipProgressResponse {
+    movieId: string;
+    currentClipIndex: number;
+    clips: Array<{
+        clipId: string;
+        sequence: number;
+        watched: boolean;
+    }>;
+}
+
+export async function getMovieClipProgress(movieId: string): Promise<MovieClipProgressResponse> {
+    return apiRequest<MovieClipProgressResponse>(`/users/me/progress/${movieId}`);
+}
+
 export interface WatchProgressData {
     clipId: string | null;
     timestamp: number;
@@ -216,7 +302,14 @@ export async function checkAuthStatus(): Promise<{ isAuthenticated: boolean; use
 // ============== Subscription API ==============
 
 const SUBSCRIPTION_CACHE_KEY = 'cineswipe_subscription';
-export const FREE_CLIP_LIMIT = 7;
+
+export async function getAppConfig(): Promise<Record<string, string>> {
+    try {
+        return await apiRequest<Record<string, string>>('/config');
+    } catch {
+        return { FREE_CLIP_LIMIT: '7' };
+    }
+}
 
 export interface SubscriptionStatus {
     status: string; // FREE, ACTIVE, PAST_DUE, CANCELLED, EXPIRED
@@ -292,6 +385,13 @@ export async function cancelSubscription(): Promise<{ status: string; message: s
 
 export async function cancelPendingSubscription(): Promise<{ message: string }> {
     return apiRequest<{ message: string }>('/subscription/cancel-pending', { method: 'POST' });
+}
+
+export async function deleteAccountAPI(password: string): Promise<{ success: boolean; message: string }> {
+    return apiRequest<{ success: boolean; message: string }>('/users/me', {
+        method: 'DELETE',
+        body: JSON.stringify({ password }),
+    });
 }
 
 // ============== Admin API (DEPRECATED) ==============

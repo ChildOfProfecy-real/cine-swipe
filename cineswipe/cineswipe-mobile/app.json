@@ -1,37 +1,68 @@
 {
   "expo": {
-    "name": "cineswipe-mobile",
+    "name": "CineSwipe",
     "slug": "cineswipe-mobile",
     "version": "1.0.0",
     "scheme": "cineswipe",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cineswipe.app",
+      "associatedDomains": ["applinks:cineswipe.com"]
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.cineswipemobile"
+      "package": "com.cineswipe.app",
+      "permissions": ["INTERNET"],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "cineswipe",
+              "host": "movie",
+              "pathPrefix": "/"
+            },
+            {
+              "scheme": "https",
+              "host": "cineswipe.com",
+              "pathPrefix": "/movie"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "extra": {
+      "apiUrl": "http://192.168.0.106:3001",
       "router": {},
       "eas": {
         "projectId": "72dbe1e6-62ad-413d-a3c4-0a03e7f054e6"

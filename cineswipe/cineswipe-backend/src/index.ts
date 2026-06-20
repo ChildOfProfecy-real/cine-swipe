@@ -1,12 +1,29 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import pinoHttp from 'pino-http';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import path from 'path';
+import * as Sentry from '@sentry/node';
+import logger from './lib/logger';
+import { globalErrorHandler, registerProcessHandlers } from './middleware/errorHandler';
 
 // Load environment variables
 dotenv.config();
+
+// Initialize Sentry before everything else
+if (process.env.SENTRY_DSN) {
+    Sentry.init({
+        dsn: process.env.SENTRY_DSN,
+        environment: process.env.NODE_ENV || 'development',
+    });
+    logger.info('Sentry initialized successfully');
+}
+
+// Register process-level error handlers for uncaught exceptions/rejections
+// registerProcessHandlers();
 
 // Import routes
 import authRoutes from './routes/auth';
@@ -14,6 +31,7 @@ import moviesRoutes from './routes/movies';
 import usersRoutes from './routes/users';
 import adminRoutes from './routes/admin';
 import subscriptionRoutes from './routes/subscription';
+import configRoutes from './routes/config';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -21,11 +39,35 @@ const PORT = process.env.PORT || 3001;
 // Security: hide Express fingerprint
 app.disable('x-powered-by');
 
-// Middleware — allow any localhost origin (dynamic port support)
+// Security headers: CSP, HSTS, X-Frame-Options, etc.
+app.use(helmet({
+    contentSecurityPolicy: false, // Disable CSP for API (no HTML served)
+    crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow mobile app to fetch resources
+}));
+
+// Structured request logging
+app.use(pinoHttp({ logger }));
+
+// CORS — environment-driven origins for production, localhost in dev
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
+
 app.use(cors({
     origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, curl, server-to-server)
         if (!origin) return callback(null, true);
-        if (/^http:\/\/localhost(:\d+)?$/.test(origin)) {
+        // Allow any localhost origin in development
+        if (process.env.NODE_ENV !== 'production' && /^http:\/\/localhost(:\d+)?$/.test(origin)) {
+            return callback(null, true);
+        }
+        // Also allow local network IPs in development (for Expo on physical devices)
+        if (process.env.NODE_ENV !== 'production' && /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)) {
+            return callback(null, true);
+        }
+        // Allow configured production origins
+        if (ALLOWED_ORIGINS.includes(origin)) {
             return callback(null, true);
         }
         callback(new Error('Not allowed by CORS'));
@@ -50,15 +92,25 @@ const authLimiter = rateLimit({
     legacyHeaders: false,
 });
 
+// Rate limiting on general public routes — 100 requests per minute per IP
+const generalLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 100,
+    message: { error: 'Too many requests from this IP, please try again after 1 minute' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 // Serve uploaded files statically (legacy — keep for backward compatibility)
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
 // Routes
 app.use('/auth', authLimiter, authRoutes);
-app.use('/movies', moviesRoutes); // Read-only public routes only
+app.use('/movies', generalLimiter, moviesRoutes); // Read-only public routes only
 app.use('/users', usersRoutes);
 app.use('/admin', adminRoutes);
 app.use('/subscription', subscriptionRoutes);
+app.use('/config', generalLimiter, configRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -104,7 +156,10 @@ app.get('/', (req, res) => {
     });
 });
 
+// Global error handler — catches all unhandled errors in route handlers
+app.use(globalErrorHandler);
+
 // Start server
-app.listen(PORT, () => {
-    console.log(`🚀 CineSwipe API running at http://localhost:${PORT}`);
+app.listen(PORT as number, '0.0.0.0', () => {
+    logger.info(`🚀 CineSwipe API running on port ${PORT} (0.0.0.0)`);
 });

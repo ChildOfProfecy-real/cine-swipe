@@ -1,17 +1,19 @@
 import { useEffect, useState, useCallback } from "react";
-import { View, Text, ScrollView, Image, TouchableOpacity, FlatList, StyleSheet, Dimensions, ActivityIndicator, RefreshControl } from "react-native";
-import { Link } from "expo-router";
+import { View, Text, ScrollView, Image, TouchableOpacity, FlatList, StyleSheet, Dimensions, ActivityIndicator, RefreshControl, Alert } from "react-native";
+import { Link, useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
-import { Play, Plus } from "lucide-react-native";
+import { BlurView } from "expo-blur";
+import { Play, Plus, Check } from "lucide-react-native";
 import { useAppStore } from "../../src/lib/store";
 import { Movie } from "../../src/types";
 import { getContinueWatching, MovieWithProgress } from "../../src/lib/api";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 export default function HomeScreen() {
-    const { movies, moviesLoading, moviesError, fetchMovies, isAuthenticated } = useAppStore();
+    const { movies, moviesLoading, moviesError, fetchMovies, isAuthenticated, toggleWatchLater, isInWatchLater } = useAppStore();
+    const router = useRouter();
     const [continueWatching, setContinueWatching] = useState<MovieWithProgress[]>([]);
     const [refreshing, setRefreshing] = useState(false);
 
@@ -55,16 +57,35 @@ export default function HomeScreen() {
     const actionMovies = movies.filter(m => m.genre === 'Action');
     const sciFiMovies = movies.filter(m => m.genre === 'Sci-Fi');
     const featuredMovie = movies[0];
+    const inWatchLater = featuredMovie ? isInWatchLater(featuredMovie.id) : false;
+
+    const handleWatchLater = () => {
+        if (!featuredMovie) return;
+        if (!isAuthenticated) {
+            Alert.alert('Sign In Required', 'Please log in to add movies to your list.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign In', onPress: () => router.push('/login') },
+            ]);
+            return;
+        }
+        toggleWatchLater(featuredMovie.id);
+    };
 
     const renderMovie = ({ item }: { item: Movie }) => (
         <Link href={`/player/${item.id}`} asChild>
-            <TouchableOpacity style={styles.movieCard}>
+            <TouchableOpacity style={styles.recommendedCard}>
                 <Image
                     source={{ uri: item.thumbnailUrl }}
-                    style={styles.movieThumbnail}
+                    style={styles.recommendedImage}
                     resizeMode="cover"
                 />
-                <Text style={styles.movieTitle} numberOfLines={1}>{item.title}</Text>
+                <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.9)']}
+                    style={styles.recommendedOverlay}
+                >
+                    <Text style={styles.recommendedTitle}>{item.title}</Text>
+                    <Text style={styles.recommendedGenre}>{item.genre}</Text>
+                </LinearGradient>
             </TouchableOpacity>
         </Link>
     );
@@ -78,6 +99,25 @@ export default function HomeScreen() {
                     style={styles.top10Thumbnail}
                     resizeMode="cover"
                 />
+            </TouchableOpacity>
+        </Link>
+    );
+
+    const renderRecommendedMovie = ({ item }: { item: Movie }) => (
+        <Link href={`/player/${item.id}`} asChild>
+            <TouchableOpacity style={styles.recommendedCard}>
+                <Image
+                    source={{ uri: item.thumbnailUrl }}
+                    style={styles.recommendedImage}
+                    resizeMode="cover"
+                />
+                <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.9)']}
+                    style={styles.recommendedOverlay}
+                >
+                    <Text style={styles.recommendedTitle}>{item.title}</Text>
+                    <Text style={styles.recommendedGenre}>{item.genre}</Text>
+                </LinearGradient>
             </TouchableOpacity>
         </Link>
     );
@@ -182,6 +222,11 @@ export default function HomeScreen() {
                     />
                 }
             >
+                {/* Header Overlay */}
+                <View style={styles.headerContainer}>
+                    <Text style={styles.headerLogo}>CineSwipe</Text>
+                </View>
+
                 {/* Hero Section */}
                 <View style={styles.heroSection}>
                     <Image
@@ -190,22 +235,20 @@ export default function HomeScreen() {
                         resizeMode="cover"
                     />
                     <LinearGradient
-                        colors={['transparent', 'rgba(0,0,0,0.8)', '#000']}
+                        colors={['transparent', 'rgba(0,0,0,0.6)', '#000']}
                         style={styles.heroGradient}
                     >
-                        <Text style={styles.heroTitle}>{featuredMovie.title}</Text>
-                        <Text style={styles.heroGenre}>{featuredMovie.genre}</Text>
-
-                        <View style={styles.heroButtons}>
+                        <View style={styles.heroButtonsColumn}>
                             <Link href={`/player/${featuredMovie.id}`} asChild>
-                                <TouchableOpacity style={styles.playButton}>
-                                    <Play fill="black" size={20} color="black" />
-                                    <Text style={styles.playButtonText}>Play</Text>
+                                <TouchableOpacity activeOpacity={0.8} style={styles.playButtonCircular}>
+                                    <View style={styles.playIconContainer}>
+                                        <Play fill="white" size={28} color="white" style={{marginLeft: 4}} />
+                                    </View>
                                 </TouchableOpacity>
                             </Link>
 
-                            <TouchableOpacity style={styles.listButton}>
-                                <Plus size={20} color="white" />
+                            <TouchableOpacity activeOpacity={0.8} onPress={handleWatchLater} style={styles.listButtonTextOnly}>
+                                {inWatchLater ? <Check size={16} color="white" /> : <Plus size={16} color="white" />}
                                 <Text style={styles.listButtonText}>My List</Text>
                             </TouchableOpacity>
                         </View>
@@ -233,16 +276,22 @@ export default function HomeScreen() {
                             data={continueWatching}
                             renderItem={({ item }) => (
                                 <Link href={`/player/${item.id}?clipIndex=${Math.floor(item.watchProgress.timestamp)}`} asChild>
-                                    <TouchableOpacity style={styles.continueCard}>
+                                    <TouchableOpacity style={styles.recommendedCard}>
                                         <Image
                                             source={{ uri: item.thumbnailUrl }}
-                                            style={styles.movieThumbnail}
+                                            style={styles.recommendedImage}
                                             resizeMode="cover"
                                         />
-                                        <View style={styles.progressBar}>
-                                            <View style={[styles.progressFill, { width: '50%' }]} />
+                                        <LinearGradient
+                                            colors={['transparent', 'rgba(0,0,0,0.9)']}
+                                            style={styles.recommendedOverlay}
+                                        >
+                                            <Text style={styles.recommendedTitle}>{item.title}</Text>
+                                            <Text style={styles.recommendedGenre}>{item.genre}</Text>
+                                        </LinearGradient>
+                                        <View style={[styles.progressBar, { position: 'absolute', bottom: 0, left: 0, right: 0, marginTop: 0, borderRadius: 0, height: 4 }]}>
+                                            <View style={[styles.progressFill, { width: '50%', borderRadius: 0 }]} />
                                         </View>
-                                        <Text style={styles.movieTitle} numberOfLines={1}>{item.title}</Text>
                                     </TouchableOpacity>
                                 </Link>
                             )}
@@ -254,12 +303,24 @@ export default function HomeScreen() {
 
                 {/* Top 10 Row */}
                 <View style={styles.rowContainer}>
-                    <Text style={styles.rowTitle}>Top 10 in Your Country</Text>
+                    <Text style={styles.rowTitle}>Top 10 Clips in Your Country</Text>
                     <FlatList
                         horizontal
                         data={top10Movies}
                         renderItem={renderTop10Movie}
                         keyExtractor={(item) => `top10-${item.id}`}
+                        showsHorizontalScrollIndicator={false}
+                    />
+                </View>
+
+                {/* Recommended for You Row */}
+                <View style={styles.rowContainer}>
+                    <Text style={styles.rowTitle}>Recommended for You</Text>
+                    <FlatList
+                        horizontal
+                        data={movies.slice(5, 15)}
+                        renderItem={renderRecommendedMovie}
+                        keyExtractor={(item) => `recommended-${item.id}`}
                         showsHorizontalScrollIndicator={false}
                     />
                 </View>
@@ -329,7 +390,7 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
     heroSection: {
-        height: 450,
+        height: SCREEN_HEIGHT * 0.65,
         width: '100%',
         position: 'relative',
     },
@@ -337,57 +398,64 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
     },
+    headerContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 10,
+        alignItems: 'center',
+        paddingTop: 50, // Safe area approx
+    },
+    headerLogo: {
+        color: '#fff',
+        fontSize: 20,
+        fontWeight: 'bold',
+        letterSpacing: 1,
+    },
     heroGradient: {
         position: 'absolute',
         bottom: 0,
         width: '100%',
-        height: 220,
+        height: 280,
         justifyContent: 'flex-end',
-        paddingBottom: 20,
+        paddingBottom: 30,
         paddingHorizontal: 16,
     },
-    heroTitle: {
-        color: '#fff',
-        fontSize: 32,
-        fontWeight: 'bold',
-        textAlign: 'center',
-        marginBottom: 8,
-    },
-    heroGenre: {
-        color: '#ccc',
-        textAlign: 'center',
-        marginBottom: 20,
-    },
-    heroButtons: {
-        flexDirection: 'row',
-        justifyContent: 'center',
+    heroButtonsColumn: {
+        flexDirection: 'column',
+        alignItems: 'center',
         gap: 16,
     },
-    playButton: {
-        backgroundColor: '#fff',
+    playButtonCircular: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    playIconContainer: {
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    listButtonTextOnly: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 24,
-        paddingVertical: 10,
-        borderRadius: 4,
-    },
-    playButtonText: {
-        color: '#000',
-        fontWeight: 'bold',
-        marginLeft: 8,
-    },
-    listButton: {
-        backgroundColor: '#555',
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 24,
-        paddingVertical: 10,
-        borderRadius: 4,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
     },
     listButtonText: {
         color: '#fff',
         fontWeight: 'bold',
         marginLeft: 8,
+        fontSize: 12,
     },
     rowContainer: {
         paddingHorizontal: 16,
@@ -399,16 +467,17 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         marginBottom: 12,
+        letterSpacing: 0.5,
     },
     movieCard: {
-        marginRight: 12,
-        width: 110,
+        marginRight: 16,
+        width: 120,
     },
     movieThumbnail: {
-        width: 110,
-        height: 160,
-        borderRadius: 6,
-        backgroundColor: '#333',
+        width: 120,
+        height: 175,
+        borderRadius: 8,
+        backgroundColor: '#1a1a1a',
     },
     movieTitle: {
         color: '#fff',
@@ -417,20 +486,21 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     top10Card: {
-        marginRight: 12,
+        marginRight: 16,
         flexDirection: 'row',
         alignItems: 'flex-end',
     },
     top10Number: {
-        color: '#141414',
-        fontSize: 100,
-        fontWeight: 'bold',
+        color: '#ffffff',
+        fontSize: 120,
+        fontWeight: '900',
         fontStyle: 'italic',
-        textShadowColor: '#fff',
-        textShadowOffset: { width: 2, height: 0 },
-        textShadowRadius: 0,
-        marginRight: -20,
+        marginRight: -25,
         zIndex: 1,
+        letterSpacing: -5,
+        textShadowColor: 'rgba(200, 170, 100, 0.8)',
+        textShadowOffset: { width: -4, height: 4 },
+        textShadowRadius: 1,
     },
     top10Thumbnail: {
         width: 90,
@@ -439,8 +509,8 @@ const styles = StyleSheet.create({
         backgroundColor: '#333',
     },
     continueCard: {
-        marginRight: 12,
-        width: 110,
+        marginRight: 16,
+        width: 120,
     },
     progressBar: {
         height: 3,
@@ -452,5 +522,35 @@ const styles = StyleSheet.create({
         height: '100%',
         backgroundColor: '#E50914',
         borderRadius: 2,
+    },
+    recommendedCard: {
+        marginRight: 16,
+        width: 150,
+        height: 220,
+        borderRadius: 8,
+        overflow: 'hidden',
+    },
+    recommendedImage: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#1a1a1a',
+    },
+    recommendedOverlay: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        padding: 12,
+        paddingTop: 30,
+    },
+    recommendedTitle: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: 'bold',
+        marginBottom: 2,
+    },
+    recommendedGenre: {
+        color: '#aaa',
+        fontSize: 11,
     },
 });

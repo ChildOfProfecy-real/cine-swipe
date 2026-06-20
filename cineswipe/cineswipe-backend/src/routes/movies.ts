@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { authMiddleware } from '../middleware/auth';
+import logger from '../lib/logger';
 
 const router = Router();
 
@@ -39,7 +40,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
             }
         });
     } catch (error) {
-        console.error('Get movies error:', error);
+        logger.error({ err: error }, 'Get movies error');
         res.status(500).json({ error: 'Failed to fetch movies' });
     }
 });
@@ -69,10 +70,21 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 
         res.json(movie);
     } catch (error) {
-        console.error('Get movie error:', error);
+        logger.error({ err: error }, 'Get movie error');
         res.status(500).json({ error: 'Failed to fetch movie' });
     }
 });
+
+// Helper to escape HTML characters for XSS prevention
+const escapeHtml = (text: string): string => {
+    return text.replace(/[<>&"']/g, char => ({
+        '<': '&lt;',
+        '>': '&gt;',
+        '&': '&amp;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[char] || char));
+};
 
 // POST /movies/:id/comments - Add comment (authenticated users)
 router.post('/:id/comments', authMiddleware, async (req: Request, res: Response): Promise<void> => {
@@ -92,14 +104,16 @@ router.post('/:id/comments', authMiddleware, async (req: Request, res: Response)
             return;
         }
 
+        const sanitizedContent = escapeHtml(content.trim());
+
         const comment = await prisma.comment.create({
-            data: { userId, movieId, content: content.trim() },
+            data: { userId, movieId, content: sanitizedContent },
             include: { user: { select: { id: true, name: true } } }
         });
 
         res.status(201).json(comment);
     } catch (error) {
-        console.error('Add comment error:', error);
+        logger.error({ err: error }, 'Add comment error');
         res.status(500).json({ error: 'Failed to add comment' });
     }
 });
