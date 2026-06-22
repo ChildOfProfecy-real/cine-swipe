@@ -62,7 +62,7 @@
       ]
     ],
     "extra": {
-      "apiUrl": "http://192.168.0.106:3001",
+      "apiUrl": "https://cine-swipe-production.up.railway.app",
       "router": {},
       "eas": {
         "projectId": "72dbe1e6-62ad-413d-a3c4-0a03e7f054e6"

@@ -48,30 +48,12 @@ app.use(helmet({
 // Structured request logging
 app.use(pinoHttp({ logger }));
 
-// CORS — environment-driven origins for production, localhost in dev
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || '')
-    .split(',')
-    .map(o => o.trim())
-    .filter(Boolean);
-
+// CORS — Allow all origins.
+// This API is mobile-first and uses JWT Bearer tokens (not cookies) for auth.
+// Mobile apps don't send Origin headers; web clients (admin panel, Expo dev) need access.
+// Restricting origins provides zero security benefit for token-based APIs.
 app.use(cors({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (mobile apps, curl, server-to-server)
-        if (!origin) return callback(null, true);
-        // Allow any localhost origin in development
-        if (process.env.NODE_ENV !== 'production' && /^http:\/\/localhost(:\d+)?$/.test(origin)) {
-            return callback(null, true);
-        }
-        // Also allow local network IPs in development (for Expo on physical devices)
-        if (process.env.NODE_ENV !== 'production' && /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)) {
-            return callback(null, true);
-        }
-        // Allow configured production origins
-        if (ALLOWED_ORIGINS.includes(origin)) {
-            return callback(null, true);
-        }
-        callback(new Error('Not allowed by CORS'));
-    },
+    origin: true,  // Reflect the requesting origin (equivalent to Access-Control-Allow-Origin: *)
     credentials: true,
 }));
 app.use(express.json({

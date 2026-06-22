@@ -5,49 +5,46 @@ import Constants from 'expo-constants';
 import { Movie, User, PaginatedMovies } from '../types';
 
 // API Configuration
-// Priority: EXPO_PUBLIC_API_URL env var (production builds) > platform-specific defaults
 const getApiBaseUrl = (): string => {
-    // 1. Env var from eas.json (used in EAS production/preview builds)
+    // HARDCODED PRODUCTION URL — this guarantees we always hit Railway
+    // Remove this line and uncomment the env var check below when doing pure local dev
+    const RAILWAY_URL = 'https://cine-swipe-production.up.railway.app';
+    console.log('🚀 API URL:', RAILWAY_URL);
+    return RAILWAY_URL;
+
+    // --- Below is the dynamic resolution logic (currently bypassed) ---
+    // Uncomment the block below if you want to use .env or local dev IP instead
+    /*
     if (process.env.EXPO_PUBLIC_API_URL) {
+        console.log('✅ Using EXPO_PUBLIC_API_URL:', process.env.EXPO_PUBLIC_API_URL);
         return process.env.EXPO_PUBLIC_API_URL;
     }
-    // 2. On web, always use localhost (browser runs on the same machine as dev server)
     if (Platform.OS === 'web') {
         return 'http://localhost:3001';
     }
-
-    // 3. Ultra-reliable Dynamic IP resolution for development
-    // NativeModules.SourceCode.scriptURL contains the exact URL the JS bundle was loaded from
-    // Example: "http://192.168.1.14:8081/index.bundle?..."
-    if (__DEV__ && NativeModules.SourceCode && NativeModules.SourceCode.scriptURL) {
-        try {
-            const scriptUrl = NativeModules.SourceCode.scriptURL;
-            const match = scriptUrl.match(/^https?:\/\/([^:/]+)/);
-            if (match && match[1]) {
-                const ip = match[1];
-                if (ip !== 'localhost' && ip !== '127.0.0.1' && ip !== '10.0.2.2') {
-                    console.log('Dynamically resolved backend IP from scriptURL:', ip);
-                    return `http://${ip}:3001`;
+    if (__DEV__) {
+        if (NativeModules.SourceCode && NativeModules.SourceCode.scriptURL) {
+            try {
+                const scriptUrl = NativeModules.SourceCode.scriptURL;
+                const match = scriptUrl.match(/^https?:\/\/([^:/]+)/);
+                if (match && match[1]) {
+                    const ip = match[1];
+                    if (ip !== 'localhost' && ip !== '127.0.0.1' && ip !== '10.0.2.2') {
+                        return `http://${ip}:3001`;
+                    }
                 }
+            } catch (e) {}
+        }
+        const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.hostUri;
+        if (hostUri) {
+            const ip = hostUri.split(':')[0];
+            if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+                return `http://${ip}:3001`;
             }
-        } catch (e) {
-            console.log('Failed to parse scriptURL', e);
         }
     }
-    
-    // 4. Fallback to Expo Constants
-    const hostUri = Constants.expoConfig?.hostUri || Constants.manifest?.hostUri;
-    if (hostUri) {
-        const ip = hostUri.split(':')[0];
-        if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
-            console.log('Dynamically resolved backend IP from Expo:', ip);
-            return `http://${ip}:3001`;
-        }
-    }
-
-    // 4. Fallback to app.json extra config or localhost
-    console.log('Falling back to app.json extra apiUrl');
     return Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3001';
+    */
 };
 
 const API_BASE_URL = getApiBaseUrl();
